@@ -1,0 +1,120 @@
+<Window x:Class="StageManagerApp.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:StageManagerApp"
+        Title="Stage Manager" Width="240"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        Topmost="True" ShowInTaskbar="False" ResizeMode="NoResize"
+        Loaded="Window_Loaded" Closed="Window_Closed">
+    <Grid>
+        <ScrollViewer VerticalAlignment="Center" Margin="0,60,0,60" VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Disabled">
+            <ItemsControl x:Name="ThumbnailsList">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <!-- 使用 #01000000 解决透明窗口穿透点击的问题 -->
+                        <Grid Margin="10,10,10,20" Width="210" 
+                              Cursor="Hand" Background="#01000000"
+                              MouseLeftButtonDown="Thumbnail_MouseLeftButtonDown"
+                              MouseMove="Thumbnail_MouseMove"
+                              MouseLeftButtonUp="Thumbnail_MouseLeftButtonUp">
+                              
+                            <Grid.Resources>
+                                <!-- Style for Side Icons (<= 2) -->
+                                <Style x:Key="SideIconsStyle" TargetType="ItemsControl">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Windows.Count}" Value="1">
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding Windows.Count}" Value="2">
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+
+                                <!-- Style for Bottom Icons (> 2) -->
+                                <Style x:Key="BottomIconsStyle" TargetType="ItemsControl">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Windows.Count}" Value="1">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding Windows.Count}" Value="2">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Grid.Resources>
+
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="110" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="50" />
+                                <ColumnDefinition Width="160" />
+                            </Grid.ColumnDefinitions>
+                            
+                            <!-- 缩略图，占用第2列 -->
+                            <ItemsControl Grid.Row="0" Grid.Column="1" ItemsSource="{Binding Windows}" HorizontalAlignment="Center" VerticalAlignment="Center" Width="160" Height="100" IsHitTestVisible="False">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <local:CascadingPanel OffsetX="12" OffsetY="12" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <!-- Border 添加 Padding 形成画框，使用纯色质感背景代替毛玻璃 -->
+                                        <Border CornerRadius="12" Padding="4" ClipToBounds="True" Background="#222222" BorderBrush="#44FFFFFF" BorderThickness="1" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                            <local:DwmThumbnailControl TargetHwnd="{Binding Hwnd}" />
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <!-- 图标居左 (数量 <= 2 时显示在旁边，真居中) -->
+                            <ItemsControl Grid.Row="0" Grid.Column="0" ItemsSource="{Binding Windows}" Style="{StaticResource SideIconsStyle}" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <StackPanel Orientation="Vertical" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Image Source="{Binding Icon}" Width="28" Height="28" Margin="0,4,0,4" RenderOptions.BitmapScalingMode="HighQuality">
+                                            <Image.Effect>
+                                                <DropShadowEffect BlurRadius="4" Opacity="0.5" ShadowDepth="1.5" Direction="270"/>
+                                            </Image.Effect>
+                                        </Image>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <!-- 图标居下 (数量 > 2 时显示在下方，相对缩略图列真居中) -->
+                            <ItemsControl Grid.Row="1" Grid.Column="1" ItemsSource="{Binding Windows}" Style="{StaticResource BottomIconsStyle}" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,5,0,0" IsHitTestVisible="False">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <StackPanel Orientation="Horizontal" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Image Source="{Binding Icon}" Width="24" Height="24" Margin="4,0,4,0" RenderOptions.BitmapScalingMode="HighQuality">
+                                            <Image.Effect>
+                                                <DropShadowEffect BlurRadius="4" Opacity="0.5" ShadowDepth="1.5" Direction="270"/>
+                                            </Image.Effect>
+                                        </Image>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            
+                        </Grid>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+    </Grid>
+</Window>
+
+
+
