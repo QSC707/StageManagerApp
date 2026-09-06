@@ -12,8 +12,10 @@ namespace StageManagerApp
         protected override Size MeasureOverride(Size availableSize)
         {
             Size resultSize = new Size(0, 0);
-            foreach (UIElement child in InternalChildren)
+            var children = InternalChildren;
+            for (int i = 0; i < children.Count; i++)
             {
+                UIElement child = children[i];
                 child.Measure(availableSize);
                 resultSize.Width = Math.Max(resultSize.Width, child.DesiredSize.Width);
                 resultSize.Height = Math.Max(resultSize.Height, child.DesiredSize.Height);
@@ -30,8 +32,10 @@ namespace StageManagerApp
         {
             double x = 0;
             double y = 0;
-            foreach (UIElement child in InternalChildren)
+            var children = InternalChildren;
+            for (int i = 0; i < children.Count; i++)
             {
+                UIElement child = children[i];
                 child.Arrange(new Rect(x, y, child.DesiredSize.Width, child.DesiredSize.Height));
                 x += OffsetX;
                 y += OffsetY;

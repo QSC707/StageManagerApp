@@ -11,6 +11,7 @@ namespace StageManagerApp
     {
         private IntPtr _dwmThumbnail = IntPtr.Zero;
         private Window? _window;
+        private Action? _updateAction;
 
         public static readonly DependencyProperty TargetHwndProperty = DependencyProperty.Register(
             nameof(TargetHwnd),
@@ -27,6 +28,7 @@ namespace StageManagerApp
         public DwmThumbnailControl()
         {
             InitializeComponent();
+            _updateAction = ExecuteUpdate;
             this.LayoutUpdated += DwmThumbnailControl_LayoutUpdated;
             this.Loaded += DwmThumbnailControl_Loaded;
             this.Unloaded += DwmThumbnailControl_Unloaded;
@@ -51,9 +53,21 @@ namespace StageManagerApp
             UnregisterThumbnail();
         }
 
+        private bool _isUpdatePending = false;
+
+        private void ExecuteUpdate()
+        {
+            _isUpdatePending = false;
+            UpdateThumbnail();
+        }
+
         private void DwmThumbnailControl_LayoutUpdated(object? sender, EventArgs e)
         {
-            UpdateThumbnail();
+            if (!_isUpdatePending)
+            {
+                _isUpdatePending = true;
+                Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Render, _updateAction);
+            }
         }
 
         private Win32.RECT _lastRect;

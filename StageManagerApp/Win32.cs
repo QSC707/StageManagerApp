@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.Marshalling;
 using System.Text;
 
 namespace StageManagerApp
@@ -30,36 +31,39 @@ namespace StageManagerApp
         public const int DWM_TNP_VISIBLE = 0x00000008;
         public const int DWM_TNP_SOURCECLIENTAREAONLY = 0x00000010;
 
-        [DllImport("dwmapi.dll")]
-        public static extern int DwmRegisterThumbnail(IntPtr dest, IntPtr src, out IntPtr thumb);
+        [LibraryImport("dwmapi.dll")]
+        public static partial int DwmRegisterThumbnail(IntPtr dest, IntPtr src, out IntPtr thumb);
 
-        [DllImport("dwmapi.dll")]
-        public static extern int DwmUnregisterThumbnail(IntPtr thumb);
+        [LibraryImport("dwmapi.dll")]
+        public static partial int DwmUnregisterThumbnail(IntPtr thumb);
 
-        [DllImport("dwmapi.dll")]
-        public static extern int DwmUpdateThumbnailProperties(IntPtr hThumb, ref DWM_THUMBNAIL_PROPERTIES props);
+        [LibraryImport("dwmapi.dll")]
+        public static partial int DwmUpdateThumbnailProperties(IntPtr hThumb, ref DWM_THUMBNAIL_PROPERTIES props);
 
-        [DllImport("dwmapi.dll")]
-        public static extern int DwmQueryThumbnailSourceSize(IntPtr thumb, out PSIZE size);
+        [LibraryImport("dwmapi.dll")]
+        public static partial int DwmQueryThumbnailSourceSize(IntPtr thumb, out PSIZE size);
 
-        [DllImport("user32.dll")]
-        public static extern bool EnumWindows(EnumWindowsProc enumProc, IntPtr lParam);
+        [LibraryImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static partial bool EnumWindows(EnumWindowsProc enumProc, IntPtr lParam);
         public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
-        [DllImport("user32.dll", SetLastError = true)]
-        public static extern bool IsWindow(IntPtr hWnd);
+        [LibraryImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static partial bool IsWindow(IntPtr hWnd);
 
-        [DllImport("user32.dll", SetLastError = true)]
-        public static extern bool IsWindowVisible(IntPtr hWnd);
+        [LibraryImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static partial bool IsWindowVisible(IntPtr hWnd);
 
-        [DllImport("user32.dll", SetLastError = true)]
-        public static extern bool IsIconic(IntPtr hWnd);
+        [LibraryImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static partial bool IsIconic(IntPtr hWnd);
 
-        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-        public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
 
-        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-        public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+
+        [LibraryImport("user32.dll", EntryPoint = "GetClassNameW", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
+        public static unsafe partial int GetClassName(IntPtr hWnd, char* lpClassName, int nMaxCount);
 
         [DllImport("user32.dll", SetLastError = true)]
         public static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
@@ -67,38 +71,42 @@ namespace StageManagerApp
         [DllImport("user32.dll", EntryPoint = "SetWindowLongPtr", SetLastError = true)]
         public static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
 
-        [DllImport("user32.dll")]
-        public static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
+        [LibraryImport("user32.dll")]
+        public static partial IntPtr GetWindow(IntPtr hWnd, uint uCmd);
 
-        [DllImport("user32.dll")]
-        public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+        [LibraryImport("user32.dll")]
+        public static partial uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 
-        [DllImport("dwmapi.dll")]
-        public static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out int pvAttribute, int cbAttribute);
+        [LibraryImport("dwmapi.dll")]
+        public static partial int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out int pvAttribute, int cbAttribute);
 
-        [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
-        public static extern uint RegisterWindowMessage(string lpString);
+        [LibraryImport("user32.dll", EntryPoint = "RegisterWindowMessageW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+        public static partial uint RegisterWindowMessage(string lpString);
 
-        [DllImport("user32.dll", SetLastError = true)]
-        public static extern bool RegisterShellHookWindow(IntPtr hWnd);
+        [LibraryImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static partial bool RegisterShellHookWindow(IntPtr hWnd);
 
-        [DllImport("user32.dll", SetLastError = true)]
-        public static extern bool DeregisterShellHookWindow(IntPtr hWnd);
+        [LibraryImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static partial bool DeregisterShellHookWindow(IntPtr hWnd);
 
-        [DllImport("user32.dll", SetLastError = true)]
-        public static extern IntPtr GetForegroundWindow();
+        [LibraryImport("user32.dll", SetLastError = true)]
+        public static partial IntPtr GetForegroundWindow();
 
-        [DllImport("user32.dll", SetLastError = true)]
-        public static extern bool SetForegroundWindow(IntPtr hWnd);
+        [LibraryImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static partial bool SetForegroundWindow(IntPtr hWnd);
 
-        [DllImport("user32.dll", SetLastError = true)]
-        public static extern IntPtr BeginDeferWindowPos(int nNumWindows);
+        [LibraryImport("user32.dll", SetLastError = true)]
+        public static partial IntPtr BeginDeferWindowPos(int nNumWindows);
 
-        [DllImport("user32.dll", SetLastError = true)]
-        public static extern IntPtr DeferWindowPos(IntPtr hWinPosInfo, IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint uFlags);
+        [LibraryImport("user32.dll", SetLastError = true)]
+        public static partial IntPtr DeferWindowPos(IntPtr hWinPosInfo, IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint uFlags);
 
-        [DllImport("user32.dll", SetLastError = true)]
-        public static extern bool EndDeferWindowPos(IntPtr hWinPosInfo);
+        [LibraryImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static partial bool EndDeferWindowPos(IntPtr hWinPosInfo);
 
         public static readonly IntPtr HWND_TOP = IntPtr.Zero;
         public const uint SWP_NOSIZE = 0x0001;
@@ -106,14 +114,16 @@ namespace StageManagerApp
         public const uint SWP_NOACTIVATE = 0x0010;
         public const uint SWP_SHOWWINDOW = 0x0040;
 
-        [DllImport("user32.dll")]
-        public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+        [LibraryImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static partial bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
         [DllImport("user32.dll", EntryPoint = "GetClassLongPtr")]
         public static extern IntPtr GetClassLongPtr(IntPtr hWnd, int nIndex);
 
-        [DllImport("user32.dll", SetLastError = true)]
-        public static extern bool DestroyIcon(IntPtr hIcon);
+        [LibraryImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static partial bool DestroyIcon(IntPtr hIcon);
 
         public const int GWL_EXSTYLE = -20;
         public const int WS_EX_TOOLWINDOW = 0x00000080;
@@ -133,23 +143,10 @@ namespace StageManagerApp
         
         public const int GCLP_HICON = -14;
 
-        [DllImport("shell32.dll", SetLastError = true)]
-        public static extern IntPtr SHAppBarMessage(int dwMessage, ref APPBARDATA pData);
 
-        public const int ABM_NEW = 0x00000000;
-        public const int ABM_REMOVE = 0x00000001;
-        public const int ABM_QUERYPOS = 0x00000002;
-        public const int ABM_SETPOS = 0x00000003;
-        
-        public const int ABE_LEFT = 0;
-        public const int ABE_TOP = 1;
-        public const int ABE_RIGHT = 2;
-        public const int ABE_BOTTOM = 3;
-
-        public const int APPBAR_CALLBACK = 0x8765;
-
-        [DllImport("user32.dll")]
-        public static extern bool GetWindowPlacement(IntPtr hWnd, ref WINDOWPLACEMENT lpwndpl);
+        [LibraryImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static partial bool GetWindowPlacement(IntPtr hWnd, ref WINDOWPLACEMENT lpwndpl);
 
         [StructLayout(LayoutKind.Sequential)]
         public struct WINDOWPLACEMENT
@@ -178,32 +175,24 @@ namespace StageManagerApp
         public int Bottom;
     }
 
-        [StructLayout(LayoutKind.Sequential)]
-        public struct APPBARDATA
-        {
-            public int cbSize;
-            public IntPtr hWnd;
-            public int uCallbackMessage;
-            public int uEdge;
-            public RECT rc;
-            public IntPtr lParam;
-        }
 
-        [DllImport("kernel32.dll", SetLastError = true)]
-        public static extern IntPtr OpenProcess(uint processAccess, bool bInheritHandle, uint processId);
+        [LibraryImport("kernel32.dll", SetLastError = true)]
+        public static partial IntPtr OpenProcess(uint processAccess, [MarshalAs(UnmanagedType.Bool)] bool bInheritHandle, uint processId);
         
         public const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
 
-        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-        public static extern bool QueryFullProcessImageName(IntPtr hProcess, uint dwFlags, StringBuilder lpExeName, ref uint lpdwSize);
+        [LibraryImport("kernel32.dll", EntryPoint = "QueryFullProcessImageNameW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static unsafe partial bool QueryFullProcessImageName(IntPtr hProcess, uint dwFlags, char* lpExeName, ref uint lpdwSize);
 
-        [DllImport("kernel32.dll", SetLastError = true)]
-        public static extern bool CloseHandle(IntPtr hObject);
+        [LibraryImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static partial bool CloseHandle(IntPtr hObject);
 
-        [DllImport("shell32.dll", CharSet = CharSet.Auto)]
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
         public static extern IntPtr SHGetFileInfo(string pszPath, uint dwFileAttributes, ref SHFILEINFO psfi, uint cbFileInfo, uint uFlags);
 
-        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
         public struct SHFILEINFO
         {
             public IntPtr hIcon;

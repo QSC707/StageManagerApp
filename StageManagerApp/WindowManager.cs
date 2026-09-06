@@ -45,7 +45,7 @@ namespace StageManagerApp
         private HwndSource _msgSource = null!;
         private IntPtr _msgHwnd;
 
-        private readonly StringBuilder _sbClass = new(256);
+
         private readonly Dictionary<IntPtr, ImageSource> _iconCache = [];
 
         private bool _isSwitching;
@@ -209,12 +209,20 @@ namespace StageManagerApp
             if (!IsValidStageWindow(hWnd, out var newWin) || newWin == null)
             {
                 // 如果切换到了非合法的窗口（例如桌面、任务栏），检查是否是点击桌面
-                _sbClass.Clear();
-                Win32.GetClassName(hWnd, _sbClass, _sbClass.Capacity);
-                string fgClass = _sbClass.ToString();
+                bool isDesktop = false;
+                unsafe
+                {
+                    char* buffer = stackalloc char[256];
+                    int len = Win32.GetClassName(hWnd, buffer, 256);
+                    if (len > 0) 
+                    {
+                        ReadOnlySpan<char> span = new ReadOnlySpan<char>(buffer, len);
+                        if (span is "Progman" or "WorkerW") isDesktop = true;
+                    }
+                }
                 
                 // 白皮书规则 3：返回纯净桌面
-                if (fgClass == "Progman" || fgClass == "WorkerW")
+                if (isDesktop)
                 {
                     HandleDesktopClick();
                 }
@@ -385,15 +393,14 @@ namespace StageManagerApp
             else
             {
                 // 按照窗口面积降序排列（大的垫底，小的在最顶上）
+                int wpSize = System.Runtime.InteropServices.Marshal.SizeOf<Win32.WINDOWPLACEMENT>();
                 targetGroup.Windows.Sort((a, b) =>
                 {
-                    Win32.WINDOWPLACEMENT wpA = new Win32.WINDOWPLACEMENT();
-                    wpA.length = System.Runtime.InteropServices.Marshal.SizeOf(typeof(Win32.WINDOWPLACEMENT));
+                    Win32.WINDOWPLACEMENT wpA = new Win32.WINDOWPLACEMENT { length = wpSize };
                     Win32.GetWindowPlacement(a.Hwnd, ref wpA);
                     long areaA = (wpA.rcNormalPosition.Right - wpA.rcNormalPosition.Left) * (wpA.rcNormalPosition.Bottom - wpA.rcNormalPosition.Top);
 
-                    Win32.WINDOWPLACEMENT wpB = new Win32.WINDOWPLACEMENT();
-                    wpB.length = System.Runtime.InteropServices.Marshal.SizeOf(typeof(Win32.WINDOWPLACEMENT));
+                    Win32.WINDOWPLACEMENT wpB = new Win32.WINDOWPLACEMENT { length = wpSize };
                     Win32.GetWindowPlacement(b.Hwnd, ref wpB);
                     long areaB = (wpB.rcNormalPosition.Right - wpB.rcNormalPosition.Left) * (wpB.rcNormalPosition.Bottom - wpB.rcNormalPosition.Top);
 
@@ -455,53 +462,55 @@ namespace StageManagerApp
             if (hProcess != IntPtr.Zero)
             {
                 uint size = 1024;
-                StringBuilder sb = new StringBuilder(1024);
-                if (Win32.QueryFullProcessImageName(hProcess, 0, sb, ref size))
+                unsafe
                 {
-                    string processPath = sb.ToString();
-                    Win32.CloseHandle(hProcess);
-
-                    if (_exeIconCache.TryGetValue(processPath, out var cachedIcon))
+                    char* buffer = stackalloc char[1024];
+                    if (Win32.QueryFullProcessImageName(hProcess, 0, buffer, ref size) && size > 0)
                     {
-                        // LRU: Move to end
-                        _exeIconCacheKeys.Remove(processPath);
-                        _exeIconCacheKeys.Add(processPath);
-                        return cachedIcon;
-                    }
+                        Win32.CloseHandle(hProcess);
+                        ReadOnlySpan<char> span = new ReadOnlySpan<char>(buffer, (int)size);
 
-                    Win32.SHFILEINFO shinfo = new Win32.SHFILEINFO();
-                    IntPtr hImg = Win32.SHGetFileInfo(processPath, 0, ref shinfo, (uint)Marshal.SizeOf(shinfo), Win32.SHGFI_ICON | Win32.SHGFI_LARGEICON);
-                    
-                    if (shinfo.hIcon != IntPtr.Zero)
-                    {
-                        try
+                        var lookup = _exeIconCache.GetAlternateLookup<ReadOnlySpan<char>>();
+                        if (lookup.TryGetValue(span, out var cachedIcon))
                         {
-                            var imageSource = Imaging.CreateBitmapSourceFromHIcon(shinfo.hIcon, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
-                            imageSource.Freeze();
-                            
-                            _exeIconCache[processPath] = imageSource;
-                            _exeIconCacheKeys.Add(processPath);
-                            
-                            // 熔断机制：最多保留 100 个图标，防止极端情况下的内存泄漏
-                            if (_exeIconCacheKeys.Count > 100)
+                            return cachedIcon;
+                        }
+
+                        string processPath = new string(buffer, 0, (int)size);
+                        Win32.SHFILEINFO shinfo = new Win32.SHFILEINFO();
+                        IntPtr hImg = Win32.SHGetFileInfo(processPath, 0, ref shinfo, (uint)Marshal.SizeOf(shinfo), Win32.SHGFI_ICON | Win32.SHGFI_LARGEICON);
+                        
+                        if (shinfo.hIcon != IntPtr.Zero)
+                        {
+                            try
                             {
-                                var oldest = _exeIconCacheKeys[0];
-                                _exeIconCacheKeys.RemoveAt(0);
-                                _exeIconCache.Remove(oldest);
+                                var imageSource = Imaging.CreateBitmapSourceFromHIcon(shinfo.hIcon, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
+                                imageSource.Freeze();
+                                
+                                _exeIconCache[processPath] = imageSource;
+                                _exeIconCacheKeys.Add(processPath);
+                                
+                                // 熔断机制：最多保留 100 个图标，采用简单的 FIFO 防止内存泄漏
+                                if (_exeIconCacheKeys.Count > 100)
+                                {
+                                    var oldest = _exeIconCacheKeys[0];
+                                    _exeIconCacheKeys.RemoveAt(0);
+                                    _exeIconCache.Remove(oldest);
+                                }
+                                
+                                return imageSource;
                             }
-                            
-                            return imageSource;
-                        }
-                        catch { }
-                        finally
-                        {
-                            Win32.DestroyIcon(shinfo.hIcon);
+                            catch { }
+                            finally
+                            {
+                                Win32.DestroyIcon(shinfo.hIcon);
+                            }
                         }
                     }
-                }
-                else
-                {
-                    Win32.CloseHandle(hProcess);
+                    else
+                    {
+                        Win32.CloseHandle(hProcess);
+                    }
                 }
             }
 
@@ -525,11 +534,21 @@ namespace StageManagerApp
             info = null;
             if (!Win32.IsWindow(hWnd) || !Win32.IsWindowVisible(hWnd)) return false;
 
-            _sbClass.Clear();
-            Win32.GetClassName(hWnd, _sbClass, _sbClass.Capacity);
-            string className = _sbClass.ToString();
-
-            if (className is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Windows.UI.Core.CoreWindow" or "StageManagerApp") return false;
+            bool isExcluded = false;
+            unsafe
+            {
+                char* buffer = stackalloc char[256];
+                int len = Win32.GetClassName(hWnd, buffer, 256);
+                if (len > 0) 
+                {
+                    ReadOnlySpan<char> span = new ReadOnlySpan<char>(buffer, len);
+                    if (span is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Windows.UI.Core.CoreWindow" or "StageManagerApp") 
+                    {
+                        isExcluded = true;
+                    }
+                }
+            }
+            if (isExcluded) return false;
 
             long exStyle = Win32.GetWindowLongPtr(hWnd, Win32.GWL_EXSTYLE).ToInt64();
             if ((exStyle & Win32.WS_EX_TOOLWINDOW) != 0) return false;
