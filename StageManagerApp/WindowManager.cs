@@ -10,6 +10,7 @@ using System.Windows.Interop;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Runtime.InteropServices;
 using Serilog;
 
 namespace StageManagerApp
@@ -51,6 +52,10 @@ namespace StageManagerApp
 
         public ObservableCollection<StageGroup> BackgroundGroups { get; } = [];
         public StageGroup? ActiveStage { get; private set; }
+
+        public WindowManager()
+        {
+        }
 
         public void Initialize()
         {
@@ -323,40 +328,7 @@ namespace StageManagerApp
                 
                 ActiveStage = targetGroup;
 
-                // 按照窗口面积降序排列（大的先恢复垫底，小的后恢复在最顶上）
-                targetGroup.Windows.Sort((a, b) =>
-                {
-                    Win32.WINDOWPLACEMENT wpA = new Win32.WINDOWPLACEMENT();
-                    wpA.length = System.Runtime.InteropServices.Marshal.SizeOf(typeof(Win32.WINDOWPLACEMENT));
-                    Win32.GetWindowPlacement(a.Hwnd, ref wpA);
-                    long areaA = (wpA.rcNormalPosition.Right - wpA.rcNormalPosition.Left) * (wpA.rcNormalPosition.Bottom - wpA.rcNormalPosition.Top);
-
-                    Win32.WINDOWPLACEMENT wpB = new Win32.WINDOWPLACEMENT();
-                    wpB.length = System.Runtime.InteropServices.Marshal.SizeOf(typeof(Win32.WINDOWPLACEMENT));
-                    Win32.GetWindowPlacement(b.Hwnd, ref wpB);
-                    long areaB = (wpB.rcNormalPosition.Right - wpB.rcNormalPosition.Left) * (wpB.rcNormalPosition.Bottom - wpB.rcNormalPosition.Top);
-
-                    return areaB.CompareTo(areaA);
-                });
-
-                // 将最小的窗口设为焦点
-                var smallest = targetGroup.Windows.LastOrDefault();
-                if (smallest != null)
-                {
-                    targetGroup.PrimaryHwnd = smallest.Hwnd;
-                    if (smallest.Icon != null) targetGroup.Icon = smallest.Icon;
-                }
-
-                // 给 UI 引擎留出 50 毫秒的时间去销毁缩略图，彻底解决黑框闪烁问题
-                await Task.Delay(50);
-
-                foreach (var win in targetGroup.Windows)
-                {
-                    Win32.ShowWindow(win.Hwnd, Win32.SW_RESTORE);
-                }
-                Win32.SetForegroundWindow(targetGroup.PrimaryHwnd);
-                
-                await Task.Delay(100); // 让 UI 和系统的焦点消息飞一会儿
+                await RestoreStageGroupAsync(targetGroup);
             }
             catch (Exception ex)
             {
@@ -385,7 +357,34 @@ namespace StageManagerApp
                 BackgroundGroups.Remove(targetGroup);
                 ActiveStage.Windows.AddRange(targetGroup.Windows);
                 
-                // 按照窗口面积降序排列（大的先恢复垫底，小的后恢复在最顶上）
+                await RestoreStageGroupAsync(targetGroup);
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "Exception in GroupWithStage");
+            }
+            finally
+            {
+                _isSwitching = false;
+            }
+        }
+
+        private async Task RestoreStageGroupAsync(StageGroup targetGroup)
+        {
+            // 给 UI 引擎留出 50 毫秒的时间去销毁缩略图，彻底解决黑框闪烁问题
+            await Task.Delay(50);
+
+            if (targetGroup.Windows.Count == 0) return;
+
+            if (targetGroup.Windows.Count == 1)
+            {
+                var win = targetGroup.Windows[0];
+                Win32.ShowWindow(win.Hwnd, Win32.SW_RESTORE);
+                Win32.SetForegroundWindow(win.Hwnd);
+            }
+            else
+            {
+                // 按照窗口面积降序排列（大的垫底，小的在最顶上）
                 targetGroup.Windows.Sort((a, b) =>
                 {
                     Win32.WINDOWPLACEMENT wpA = new Win32.WINDOWPLACEMENT();
@@ -401,50 +400,123 @@ namespace StageManagerApp
                     return areaB.CompareTo(areaA);
                 });
 
-                // 将最小的设为焦点
+                // 将最小的窗口设为焦点
                 var smallest = targetGroup.Windows.LastOrDefault();
                 if (smallest != null)
                 {
                     targetGroup.PrimaryHwnd = smallest.Hwnd;
+                    if (smallest.Icon != null) targetGroup.Icon = smallest.Icon;
                 }
 
-                // 给 UI 引擎留出 50 毫秒的时间去销毁缩略图，解决黑框闪烁问题
-                await Task.Delay(50);
-                
-                foreach (var win in targetGroup.Windows)
+                IntPtr hdwp = Win32.BeginDeferWindowPos(targetGroup.Windows.Count);
+                if (hdwp != IntPtr.Zero)
                 {
-                    Win32.ShowWindow(win.Hwnd, Win32.SW_RESTORE);
+                    // 反向遍历：从最小的(最后面的)开始放到顶部
+                    IntPtr insertAfter = Win32.HWND_TOP;
+                    
+                    foreach (var win in targetGroup.Windows.AsEnumerable().Reverse())
+                    {
+                        // 先以无焦点方式恢复窗口
+                        Win32.ShowWindow(win.Hwnd, Win32.SW_SHOWNOACTIVATE);
+                        // 然后通过 DeferWindowPos 设置层级
+                        hdwp = Win32.DeferWindowPos(hdwp, win.Hwnd, insertAfter, 0, 0, 0, 0, Win32.SWP_NOMOVE | Win32.SWP_NOSIZE | Win32.SWP_NOACTIVATE);
+                        if (hdwp == IntPtr.Zero) break;
+                        insertAfter = win.Hwnd; // 保证下一个（较大的）窗口压在当前窗口下面
+                    }
+
+                    if (hdwp != IntPtr.Zero)
+                    {
+                        Win32.EndDeferWindowPos(hdwp);
+                    }
                 }
-                Win32.SetForegroundWindow(targetGroup.PrimaryHwnd);
+                else
+                {
+                    // Fallback
+                    foreach (var win in targetGroup.Windows)
+                    {
+                        Win32.ShowWindow(win.Hwnd, Win32.SW_RESTORE);
+                    }
+                }
                 
-                await Task.Delay(100);
+                Win32.SetForegroundWindow(targetGroup.PrimaryHwnd);
             }
-            catch (Exception ex)
-            {
-                Log.Error(ex, "Exception in GroupWithStage");
-            }
-            finally
-            {
-                _isSwitching = false;
-            }
+
+            await Task.Delay(100); // 让 UI 和系统的焦点消息飞一会儿
         }
+
+        private Dictionary<string, ImageSource> _exeIconCache = new(StringComparer.OrdinalIgnoreCase);
+        private List<string> _exeIconCacheKeys = new List<string>();
 
         private ImageSource? ExtractWindowIcon(IntPtr hwnd)
         {
-            IntPtr hIcon = Win32.SendMessage(hwnd, Win32.WM_GETICON, Win32.ICON_BIG, IntPtr.Zero);
-            if (hIcon == IntPtr.Zero) hIcon = Win32.SendMessage(hwnd, Win32.WM_GETICON, Win32.ICON_SMALL2, IntPtr.Zero);
-            if (hIcon == IntPtr.Zero) hIcon = Win32.GetClassLongPtr(hwnd, Win32.GCLP_HICON);
+            Win32.GetWindowThreadProcessId(hwnd, out uint pid);
+            IntPtr hProcess = Win32.OpenProcess(Win32.PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+            
+            if (hProcess != IntPtr.Zero)
+            {
+                uint size = 1024;
+                StringBuilder sb = new StringBuilder(1024);
+                if (Win32.QueryFullProcessImageName(hProcess, 0, sb, ref size))
+                {
+                    string processPath = sb.ToString();
+                    Win32.CloseHandle(hProcess);
 
-            if (hIcon != IntPtr.Zero)
+                    if (_exeIconCache.TryGetValue(processPath, out var cachedIcon))
+                    {
+                        // LRU: Move to end
+                        _exeIconCacheKeys.Remove(processPath);
+                        _exeIconCacheKeys.Add(processPath);
+                        return cachedIcon;
+                    }
+
+                    Win32.SHFILEINFO shinfo = new Win32.SHFILEINFO();
+                    IntPtr hImg = Win32.SHGetFileInfo(processPath, 0, ref shinfo, (uint)Marshal.SizeOf(shinfo), Win32.SHGFI_ICON | Win32.SHGFI_LARGEICON);
+                    
+                    if (shinfo.hIcon != IntPtr.Zero)
+                    {
+                        try
+                        {
+                            var imageSource = Imaging.CreateBitmapSourceFromHIcon(shinfo.hIcon, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
+                            imageSource.Freeze();
+                            
+                            _exeIconCache[processPath] = imageSource;
+                            _exeIconCacheKeys.Add(processPath);
+                            
+                            // 熔断机制：最多保留 100 个图标，防止极端情况下的内存泄漏
+                            if (_exeIconCacheKeys.Count > 100)
+                            {
+                                var oldest = _exeIconCacheKeys[0];
+                                _exeIconCacheKeys.RemoveAt(0);
+                                _exeIconCache.Remove(oldest);
+                            }
+                            
+                            return imageSource;
+                        }
+                        catch { }
+                        finally
+                        {
+                            Win32.DestroyIcon(shinfo.hIcon);
+                        }
+                    }
+                }
+                else
+                {
+                    Win32.CloseHandle(hProcess);
+                }
+            }
+
+            // Fallback for system windows or when path is inaccessible
+            IntPtr hClassIcon = Win32.GetClassLongPtr(hwnd, Win32.GCLP_HICON);
+            if (hClassIcon != IntPtr.Zero)
             {
                 try {
-                    var imageSource = Imaging.CreateBitmapSourceFromHIcon(
-                        hIcon, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
+                    var imageSource = Imaging.CreateBitmapSourceFromHIcon(hClassIcon, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
                     imageSource.Freeze();
                     return imageSource;
                 } 
                 catch { }
             }
+
             return null;
         }
 

@@ -14,6 +14,7 @@ namespace StageManagerApp
         {
             InitializeComponent();
             _windowManager = new WindowManager();
+            this.DataContext = _windowManager;
         }
 
         private void Window_Loaded(object sender, RoutedEventArgs e)
