@@ -40,6 +40,8 @@ namespace StageManagerApp
 
     public class WindowManager
     {
+        private readonly ILogger _logger = Log.ForContext<WindowManager>();
+
         private static readonly uint CurrentPid = (uint)Process.GetCurrentProcess().Id;
         private uint _wmShellHook;
         private HwndSource _msgSource = null!;
@@ -59,7 +61,7 @@ namespace StageManagerApp
 
         public void Initialize()
         {
-            Log.Information("Initializing WindowManager...");
+            _logger.Information("Initializing WindowManager...");
             _wmShellHook = Win32.RegisterWindowMessage("SHELLHOOK");
 
             var parameters = new HwndSourceParameters("StageManagerMsgOnly")
@@ -79,7 +81,7 @@ namespace StageManagerApp
 
         public void Shutdown()
         {
-            Log.Information("Shutting down WindowManager...");
+            _logger.Information("Shutting down WindowManager...");
             if (_msgHwnd != IntPtr.Zero)
             {
                 Win32.DeregisterShellHookWindow(_msgHwnd);
@@ -125,6 +127,8 @@ namespace StageManagerApp
             if (msg == _wmShellHook)
             {
                 int eventCode = wParam.ToInt32();
+                _logger.Verbose("SHELLHOOK Event Received - EventCode: {EventCode}, HWND: {Hwnd:X8}", eventCode, lParam.ToInt64());
+
                 if (eventCode == Win32.HSHELL_WINDOWACTIVATED || eventCode == 32772 /* HSHELL_RUDEAPPACTIVATED */)
                 {
                     OnForegroundWindowChanged(lParam);
@@ -139,7 +143,7 @@ namespace StageManagerApp
 
         private void UngroupWindowFromActiveStage(WindowInfo win)
         {
-            Log.Information($"Ungrouping window {win.Hwnd} from active stage.");
+            _logger.Information("Ungrouping window {Hwnd:X8} from active stage.", win.Hwnd.ToInt64());
             ActiveStage!.Windows.Remove(win);
             if (ActiveStage.PrimaryHwnd == win.Hwnd && ActiveStage.Windows.Count > 0)
             {
@@ -166,6 +170,8 @@ namespace StageManagerApp
         private void OnForegroundWindowChanged(IntPtr hWnd)
         {
             if (_isSwitching) return; // 正在主动切换，忽略钩子事件
+
+            _logger.Debug("Foreground window changed. New HWND: {Hwnd:X8}", hWnd.ToInt64());
 
             // 状态审计：不论新窗口是否合法/可见，只要发生了焦点切换，我们就要回头检查当前 ActiveStage
             if (ActiveStage != null)
@@ -266,11 +272,18 @@ namespace StageManagerApp
         {
             if (ActiveStage == null) return;
             
+            _logger.Debug("Pushing ActiveStage (PrimaryHwnd: {PrimaryHwnd:X8}) to background.", ActiveStage.PrimaryHwnd.ToInt64());
+
             // 正常最小化并推入长廊顶端
             foreach (var win in ActiveStage.Windows)
             {
-                if (Win32.IsWindowVisible(win.Hwnd) && !Win32.IsIconic(win.Hwnd))
+                bool isVisible = Win32.IsWindowVisible(win.Hwnd);
+                bool isIconic = Win32.IsIconic(win.Hwnd);
+                _logger.Verbose("Evaluating ActiveStage Window {Hwnd:X8} - IsVisible: {IsVisible}, IsIconic: {IsIconic}", win.Hwnd.ToInt64(), isVisible, isIconic);
+
+                if (isVisible && !isIconic)
                 {
+                    _logger.Verbose("Minimizing Window {Hwnd:X8}", win.Hwnd.ToInt64());
                     Win32.ShowWindow(win.Hwnd, Win32.SW_MINIMIZE);
                 }
             }
@@ -288,6 +301,8 @@ namespace StageManagerApp
 
         private void OnWindowDestroyed(IntPtr hWnd)
         {
+            _logger.Debug("Window Destroyed Event for HWND: {Hwnd:X8}", hWnd.ToInt64());
+
             // 清理缓存
             _iconCache.Remove(hWnd);
 
@@ -340,7 +355,7 @@ namespace StageManagerApp
             }
             catch (Exception ex)
             {
-                Log.Error(ex, "Exception in SwitchToStage");
+                _logger.Error(ex, "Exception in SwitchToStage");
             }
             finally
             {
@@ -369,7 +384,7 @@ namespace StageManagerApp
             }
             catch (Exception ex)
             {
-                Log.Error(ex, "Exception in GroupWithStage");
+                _logger.Error(ex, "Exception in GroupWithStage");
             }
             finally
             {
