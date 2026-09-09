@@ -21,15 +21,13 @@ public partial class App : Application
         string logDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs");
         
         Log.Logger = new LoggerConfiguration()
-            .MinimumLevel.Verbose() // 放开至最高日志等级以便排查
+            .MinimumLevel.Debug()
             .WriteTo.Async(a => a.File(
                 Path.Combine(logDir, "stagemanager-.log"),
                 rollingInterval: RollingInterval.Day,
                 retainedFileCountLimit: 7,
-                outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff}] [{Level:u3}] [{SourceContext}] [T{ThreadId}] {Message:lj}{NewLine}{Exception}"))
-            .WriteTo.Debug(outputTemplate: "[{Timestamp:HH:mm:ss.fff}] [{Level:u3}] [{SourceContext}] [T{ThreadId}] {Message:lj}{NewLine}{Exception}")
+                outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff}] [{Level:u3}] [T{ThreadId}] {Message:lj}{NewLine}{Exception}"))
             .Enrich.WithThreadId()
-            .Enrich.FromLogContext()
             .CreateLogger();
             
         Log.Information("Application starting up...");

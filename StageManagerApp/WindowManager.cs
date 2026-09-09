@@ -26,8 +26,15 @@ namespace StageManagerApp
         public event PropertyChangedEventHandler? PropertyChanged;
         protected void OnPropertyChanged(string name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 
-        public Guid Id { get; } = Guid.NewGuid();
-        public List<WindowInfo> Windows { get; set; } = [];
+        private Guid _id = Guid.NewGuid();
+        public Guid Id { get => _id; set { _id = value; OnPropertyChanged(nameof(Id)); } }
+        
+        private List<WindowInfo> _windows = [];
+        public List<WindowInfo> Windows 
+        { 
+            get => _windows; 
+            set { _windows = value; OnPropertyChanged(nameof(Windows)); } 
+        }
         public IntPtr PrimaryHwnd { get; set; }
 
         private ImageSource? _icon;
@@ -40,8 +47,6 @@ namespace StageManagerApp
 
     public class WindowManager
     {
-        private readonly ILogger _logger = Log.ForContext<WindowManager>();
-
         private static readonly uint CurrentPid = (uint)Process.GetCurrentProcess().Id;
         private uint _wmShellHook;
         private HwndSource _msgSource = null!;
@@ -53,7 +58,9 @@ namespace StageManagerApp
         private bool _isSwitching;
 
         public ObservableCollection<StageGroup> BackgroundGroups { get; } = [];
-        public StageGroup? ActiveStage { get; private set; }
+        public StageGroup ActiveStage { get; private set; } = new StageGroup();
+
+        public event Action<IntPtr>? OnForegroundWindowChangedEvent;
 
         public WindowManager()
         {
@@ -61,7 +68,7 @@ namespace StageManagerApp
 
         public void Initialize()
         {
-            _logger.Information("Initializing WindowManager...");
+            Log.Information("Initializing WindowManager...");
             _wmShellHook = Win32.RegisterWindowMessage("SHELLHOOK");
 
             var parameters = new HwndSourceParameters("StageManagerMsgOnly")
@@ -81,12 +88,130 @@ namespace StageManagerApp
 
         public void Shutdown()
         {
-            _logger.Information("Shutting down WindowManager...");
+            Log.Information("Shutting down WindowManager...");
             if (_msgHwnd != IntPtr.Zero)
             {
                 Win32.DeregisterShellHookWindow(_msgHwnd);
                 _msgSource.Dispose();
                 _msgHwnd = IntPtr.Zero;
+            }
+        }
+
+        public async void GroupWithStage(StageGroup targetGroup)
+        {
+            Log.Information($"[GroupWithStage] Grouping {targetGroup.Id} into ActiveStage {ActiveStage.Id}");
+            var merged = ActiveStage.Windows.ToList();
+            merged.AddRange(targetGroup.Windows);
+            ActiveStage.Windows = merged;
+            
+            if (ActiveStage.PrimaryHwnd == IntPtr.Zero && targetGroup.PrimaryHwnd != IntPtr.Zero)
+            {
+                ActiveStage.PrimaryHwnd = targetGroup.PrimaryHwnd;
+                ActiveStage.Icon = targetGroup.Icon;
+            }
+
+            BackgroundGroups.Remove(targetGroup);
+
+            await RestoreStageGroupAsync(targetGroup);
+        }
+
+        public async void SwitchToStage(StageGroup targetGroup)
+        {
+            if (_isSwitching) return;
+            _isSwitching = true;
+            Log.Information($"[SwitchToStage] Switching to group {targetGroup.Id}. ActiveStage is {ActiveStage.Id}");
+
+            if (targetGroup.Id == ActiveStage.Id)
+            {
+                Log.Information($"[SwitchToStage] Target matches ActiveStage ID! Merging back!");
+                var merged = ActiveStage.Windows.ToList();
+                merged.AddRange(targetGroup.Windows);
+                ActiveStage.Windows = merged;
+
+                BackgroundGroups.Remove(targetGroup);
+
+                await RestoreStageGroupAsync(targetGroup);
+                
+                await Task.Delay(200);
+                _isSwitching = false;
+                return;
+            }
+
+            if (ActiveStage.Windows.Count > 0)
+            {
+                PushActiveStageToBackground();
+                // 核心优化：将延迟设为 60 毫秒
+                await Task.Delay(60);
+            }
+
+            BackgroundGroups.Remove(targetGroup);
+
+            ActiveStage.Id = targetGroup.Id;
+            ActiveStage.Windows = targetGroup.Windows.ToList();
+            ActiveStage.PrimaryHwnd = targetGroup.PrimaryHwnd;
+            ActiveStage.Icon = targetGroup.Icon;
+
+            await RestoreStageGroupAsync(ActiveStage);
+
+            await Task.Delay(200);
+            _isSwitching = false;
+        }
+
+        public async void ExtractWindowFromGroup(StageGroup sourceGroup, WindowInfo targetWin)
+        {
+            Log.Information($"[ExtractWindowFromGroup] Extracting {targetWin.Hwnd} from group {sourceGroup.Id}");
+            if (_isSwitching) return;
+            _isSwitching = true;
+
+            if (ActiveStage.Windows.Count > 0)
+            {
+                PushActiveStageToBackground();
+                // 核心优化：将延迟设为 75 毫秒
+                await Task.Delay(75);
+            }
+
+            // 完全拆分为独立的新分组，赋予全新 ID，防止之后又被错误合并！
+            ActiveStage.Id = Guid.NewGuid();
+            ActiveStage.Windows = new List<WindowInfo> { targetWin };
+            ActiveStage.PrimaryHwnd = targetWin.Hwnd;
+            ActiveStage.Icon = targetWin.Icon;
+
+            var newList = sourceGroup.Windows.ToList();
+            newList.Remove(targetWin);
+            sourceGroup.Windows = newList;
+
+            if (sourceGroup.Windows.Count == 0)
+            {
+                BackgroundGroups.Remove(sourceGroup);
+            }
+
+            if (Win32.IsIconic(targetWin.Hwnd))
+            {
+                Win32.ShowWindow(targetWin.Hwnd, Win32.SW_RESTORE);
+            }
+            Win32.SetForegroundWindow(targetWin.Hwnd);
+
+            await Task.Delay(200);
+            _isSwitching = false;
+        }
+
+        private async Task RestoreStageGroupAsync(StageGroup targetGroup)
+        {
+            if (targetGroup.Windows.Count == 0) return;
+
+            // 1. 找到“主角窗口”（被点击的那个，或者列表第一个）
+            var primaryHwnd = targetGroup.PrimaryHwnd != IntPtr.Zero ? targetGroup.PrimaryHwnd : targetGroup.Windows[0].Hwnd;
+
+            // 2. 率先且唯一地用原生的 SW_RESTORE 恢复主角窗口，它将光明正大地升起并获得焦点
+            Win32.ShowWindow(primaryHwnd, Win32.SW_RESTORE);
+
+            // 3. 其他非主角窗口，用 SW_SHOWNOACTIVATE 默默在后台恢复其原样，绝不抢主角的镜头，也绝不覆盖主角
+            foreach (var win in targetGroup.Windows)
+            {
+                if (win.Hwnd != primaryHwnd && Win32.IsIconic(win.Hwnd))
+                {
+                    Win32.ShowWindow(win.Hwnd, Win32.SW_SHOWNOACTIVATE);
+                }
             }
         }
 
@@ -108,7 +233,9 @@ namespace StageManagerApp
             {
                 if (win.Hwnd == fgHwnd)
                 {
-                    ActiveStage = new StageGroup { Windows = [win], PrimaryHwnd = win.Hwnd, Icon = win.Icon };
+                    ActiveStage.Windows = [win];
+                    ActiveStage.PrimaryHwnd = win.Hwnd;
+                    ActiveStage.Icon = win.Icon;
                 }
                 else
                 {
@@ -127,8 +254,6 @@ namespace StageManagerApp
             if (msg == _wmShellHook)
             {
                 int eventCode = wParam.ToInt32();
-                _logger.Verbose("SHELLHOOK Event Received - EventCode: {EventCode}, HWND: {Hwnd:X8}", eventCode, lParam.ToInt64());
-
                 if (eventCode == Win32.HSHELL_WINDOWACTIVATED || eventCode == 32772 /* HSHELL_RUDEAPPACTIVATED */)
                 {
                     OnForegroundWindowChanged(lParam);
@@ -141,65 +266,58 @@ namespace StageManagerApp
             return IntPtr.Zero;
         }
 
-        private void UngroupWindowFromActiveStage(WindowInfo win)
-        {
-            _logger.Information("Ungrouping window {Hwnd:X8} from active stage.", win.Hwnd.ToInt64());
-            ActiveStage!.Windows.Remove(win);
-            if (ActiveStage.PrimaryHwnd == win.Hwnd && ActiveStage.Windows.Count > 0)
-            {
-                ActiveStage.PrimaryHwnd = ActiveStage.Windows[0].Hwnd;
-            }
-
-            var newGroup = new StageGroup
-            {
-                Windows = [win],
-                PrimaryHwnd = win.Hwnd,
-                Icon = _iconCache.GetValueOrDefault(win.Hwnd)
-            };
-
-            // 被拆解的窗口将被最小化并送入侧边栏顶端，而当前组保留在屏幕上
-            if (Win32.IsWindowVisible(win.Hwnd) && !Win32.IsIconic(win.Hwnd))
-            {
-                Win32.ShowWindow(win.Hwnd, Win32.SW_MINIMIZE);
-            }
-            
-            BackgroundGroups.Insert(0, newGroup);
-            while (BackgroundGroups.Count > 6) BackgroundGroups.RemoveAt(BackgroundGroups.Count - 1);
-        }
-
         private void OnForegroundWindowChanged(IntPtr hWnd)
         {
-            if (_isSwitching) return; // 正在主动切换，忽略钩子事件
+            OnForegroundWindowChangedEvent?.Invoke(hWnd);
 
-            _logger.Debug("Foreground window changed. New HWND: {Hwnd:X8}", hWnd.ToInt64());
+            if (_isSwitching) return;
 
-            // 状态审计：不论新窗口是否合法/可见，只要发生了焦点切换，我们就要回头检查当前 ActiveStage
-            if (ActiveStage != null)
+            var minimizedWindows = ActiveStage.Windows.Where(w => Win32.IsIconic(w.Hwnd)).ToList();
+            if (minimizedWindows.Count > 0)
             {
-                var minimizedWindows = ActiveStage.Windows.Where(w => Win32.IsIconic(w.Hwnd)).ToList();
+                Log.Information($"[Audit ActiveStage] Total windows: {ActiveStage.Windows.Count}, Minimized count: {minimizedWindows.Count}");
                 
-                if (minimizedWindows.Count > 0)
+                foreach(var w in minimizedWindows)
                 {
-                    if (minimizedWindows.Count == ActiveStage.Windows.Count)
+                    ActiveStage.Windows.Remove(w);
+                }
+
+                // 放入同名长廊文件夹
+                var existingFolder = BackgroundGroups.FirstOrDefault(g => g.Id == ActiveStage.Id);
+                if (existingFolder != null)
+                {
+                    Log.Information($"[Minimize] Returning {minimizedWindows.Count} minimized windows to existing folder {ActiveStage.Id}");
+                    var merged = existingFolder.Windows.ToList();
+                    merged.AddRange(minimizedWindows);
+                    existingFolder.Windows = merged;
+                }
+                else
+                {
+                    Log.Information($"[Minimize] Creating new folder {ActiveStage.Id} in sidebar for minimized windows");
+                    var newGroup = new StageGroup { Id = ActiveStage.Id, Windows = minimizedWindows, PrimaryHwnd = minimizedWindows.First().Hwnd, Icon = minimizedWindows.First().Icon };
+                    BackgroundGroups.Insert(0, newGroup);
+                }
+
+                // 触发UI更新
+                ActiveStage.Windows = ActiveStage.Windows.ToList();
+
+                if (ActiveStage.Windows.Count == 0)
+                {
+                    Log.Information($"[Minimize] ActiveStage is empty. Generating new ID for the next stage.");
+                    ActiveStage.Id = Guid.NewGuid();
+                    ActiveStage.PrimaryHwnd = IntPtr.Zero;
+                    ActiveStage.Icon = null;
+                }
+                else
+                {
+                    if (minimizedWindows.Any(w => w.Hwnd == ActiveStage.PrimaryHwnd))
                     {
-                        // 舞台所有窗口均被最小化，直接推入长廊
-                        PushActiveStageToBackground();
-                    }
-                    else
-                    {
-                        // 多窗口组合中部分被最小化，执行拆解
-                        foreach (var win in minimizedWindows)
+                        var firstVisible = ActiveStage.Windows.FirstOrDefault();
+                        if (firstVisible != null)
                         {
-                            ActiveStage.Windows.Remove(win);
-                            if (ActiveStage.PrimaryHwnd == win.Hwnd && ActiveStage.Windows.Count > 0)
-                            {
-                                ActiveStage.PrimaryHwnd = ActiveStage.Windows[0].Hwnd;
-                            }
-                            
-                            var newGroup = new StageGroup { Windows = [win], PrimaryHwnd = win.Hwnd, Icon = win.Icon };
-                            BackgroundGroups.Insert(0, newGroup);
+                            ActiveStage.PrimaryHwnd = firstVisible.Hwnd;
+                            ActiveStage.Icon = firstVisible.Icon;
                         }
-                        while (BackgroundGroups.Count > 6) BackgroundGroups.RemoveAt(BackgroundGroups.Count - 1);
                     }
                 }
             }
@@ -214,7 +332,6 @@ namespace StageManagerApp
 
             if (!IsValidStageWindow(hWnd, out var newWin) || newWin == null)
             {
-                // 如果切换到了非合法的窗口（例如桌面、任务栏），检查是否是点击桌面
                 bool isDesktop = false;
                 unsafe
                 {
@@ -227,7 +344,6 @@ namespace StageManagerApp
                     }
                 }
                 
-                // 白皮书规则 3：返回纯净桌面
                 if (isDesktop)
                 {
                     HandleDesktopClick();
@@ -235,82 +351,112 @@ namespace StageManagerApp
                 return; 
             }
 
-            // 白皮书规则 4：外部干扰与自然切换 (Alt-Tab / 任务栏点击)
             var bgGroup = BackgroundGroups.FirstOrDefault(g => g.Windows.Any(w => w.Hwnd == hWnd));
             if (bgGroup != null)
             {
-                // 用户切换到了长廊里的某个应用
-                BackgroundGroups.Remove(bgGroup);
-                PushActiveStageToBackground();
-                
-                // 将被直接激活的窗口设为 PrimaryHwnd
-                bgGroup.PrimaryHwnd = hWnd;
-                var newlyActive = bgGroup.Windows.FirstOrDefault(w => w.Hwnd == hWnd);
-                if (newlyActive != null && newlyActive.Icon != null) bgGroup.Icon = newlyActive.Icon;
-                
-                ActiveStage = bgGroup;
+                var targetWin = bgGroup.Windows.First(w => w.Hwnd == hWnd);
+                ExtractWindowFromGroup(bgGroup, targetWin);
             }
             else
             {
-                // 用户启动或切换到了一个全新的应用
-                PushActiveStageToBackground();
-                ActiveStage = new StageGroup 
-                { 
-                    Windows = [newWin], 
-                    PrimaryHwnd = newWin.Hwnd,
-                    Icon = ExtractWindowIcon(newWin.Hwnd)
-                };
+                if (ActiveStage != null && ActiveStage.Windows.Count > 0)
+                {
+                    var newList = ActiveStage.Windows.ToList();
+                    newList.Add(newWin);
+                    ActiveStage.Windows = newList;
+                    
+                    ActiveStage.PrimaryHwnd = newWin.Hwnd;
+                    if (newWin.Icon != null) ActiveStage.Icon = newWin.Icon;
+                }
+                else
+                {
+                    // Ensure new stage starts fresh
+                    ActiveStage.Windows = [newWin];
+                    ActiveStage.PrimaryHwnd = newWin.Hwnd;
+                    ActiveStage.Icon = newWin.Icon;
+                }
             }
         }
 
         private void HandleDesktopClick()
         {
-            PushActiveStageToBackground();
+            if (_isSwitching) return;
+            _isSwitching = true;
+            try
+            {
+                PushActiveStageToBackground();
+            }
+            finally
+            {
+                _isSwitching = false;
+            }
         }
 
         private void PushActiveStageToBackground()
         {
-            if (ActiveStage == null) return;
-            
-            _logger.Debug("Pushing ActiveStage (PrimaryHwnd: {PrimaryHwnd:X8}) to background.", ActiveStage.PrimaryHwnd.ToInt64());
+            if (ActiveStage.Windows.Count == 0) return;
 
-            // 正常最小化并推入长廊顶端
+            // 正常推入长廊顶端
             foreach (var win in ActiveStage.Windows)
             {
-                bool isVisible = Win32.IsWindowVisible(win.Hwnd);
-                bool isIconic = Win32.IsIconic(win.Hwnd);
-                _logger.Verbose("Evaluating ActiveStage Window {Hwnd:X8} - IsVisible: {IsVisible}, IsIconic: {IsIconic}", win.Hwnd.ToInt64(), isVisible, isIconic);
-
-                if (isVisible && !isIconic)
+                if (Win32.IsWindowVisible(win.Hwnd) && !Win32.IsIconic(win.Hwnd))
                 {
-                    _logger.Verbose("Minimizing Window {Hwnd:X8}", win.Hwnd.ToInt64());
-                    Win32.ShowWindow(win.Hwnd, Win32.SW_MINIMIZE);
+                    // 放弃发送消息的破坏性方案，使用微软官方专门提供的异线程强制最小化标志 (SW_FORCEMINIMIZE)
+                    // 它专门用来在不影响目标程序内部逻辑的情况下，强制将其最小化（对相册等 UWP 应用完美生效且安全）
+                    Win32.ShowWindow(win.Hwnd, Win32.SW_FORCEMINIMIZE);
                 }
             }
+
+            var existingFolder = BackgroundGroups.FirstOrDefault(g => g.Id == ActiveStage.Id);
+            if (existingFolder != null)
+            {
+                Log.Information($"[PushActiveStage] Merging ActiveStage {ActiveStage.Id} into existing folder in sidebar.");
+                var merged = existingFolder.Windows.ToList();
+                merged.AddRange(ActiveStage.Windows);
+                existingFolder.Windows = merged;
+                existingFolder.PrimaryHwnd = ActiveStage.PrimaryHwnd;
+                existingFolder.Icon = ActiveStage.Icon;
+                
+                BackgroundGroups.Remove(existingFolder);
+                BackgroundGroups.Insert(0, existingFolder);
+            }
+            else
+            {
+                Log.Information($"[PushActiveStage] Creating new folder {ActiveStage.Id} in sidebar.");
+                var newGroup = new StageGroup
+                {
+                    Id = ActiveStage.Id,
+                    Windows = ActiveStage.Windows.ToList(),
+                    PrimaryHwnd = ActiveStage.PrimaryHwnd,
+                    Icon = ActiveStage.Icon
+                };
+                BackgroundGroups.Insert(0, newGroup);
+            }
             
-            BackgroundGroups.Insert(0, ActiveStage);
-            
-            // 保持最多6个后台任务
             while (BackgroundGroups.Count > 6) 
             {
                 BackgroundGroups.RemoveAt(BackgroundGroups.Count - 1);
             }
-            
-            ActiveStage = null;
+
+            ActiveStage.Id = Guid.NewGuid(); // Give the next empty stage a fresh ID!
+            ActiveStage.Windows = new List<WindowInfo>();
+            ActiveStage.PrimaryHwnd = IntPtr.Zero;
+            ActiveStage.Icon = null;
         }
 
         private void OnWindowDestroyed(IntPtr hWnd)
         {
-            _logger.Debug("Window Destroyed Event for HWND: {Hwnd:X8}", hWnd.ToInt64());
-
-            // 清理缓存
             _iconCache.Remove(hWnd);
 
-            // 从侧边栏清理
             for (int i = BackgroundGroups.Count - 1; i >= 0; i--)
             {
                 var group = BackgroundGroups[i];
-                group.Windows.RemoveAll(w => w.Hwnd == hWnd);
+                var newList = group.Windows.ToList();
+                if (newList.RemoveAll(w => w.Hwnd == hWnd) > 0)
+                {
+                    group.Windows = newList;
+                }
+                
                 if (group.Windows.Count == 0)
                 {
                     BackgroundGroups.RemoveAt(i);
@@ -321,14 +467,19 @@ namespace StageManagerApp
                 }
             }
 
-            // 白皮书规则 5：舞台窗口关闭
-            // 如果舞台变空，我们只需设为 null（露出桌面），绝对不自动把侧边栏的东西拉过来！
-            if (ActiveStage != null)
+            if (ActiveStage.Windows.Count > 0)
             {
-                ActiveStage.Windows.RemoveAll(w => w.Hwnd == hWnd);
+                var newList = ActiveStage.Windows.ToList();
+                if (newList.RemoveAll(w => w.Hwnd == hWnd) > 0)
+                {
+                    ActiveStage.Windows = newList;
+                }
+                
                 if (ActiveStage.Windows.Count == 0)
                 {
-                    ActiveStage = null;
+                    ActiveStage.Id = Guid.NewGuid();
+                    ActiveStage.PrimaryHwnd = IntPtr.Zero;
+                    ActiveStage.Icon = null;
                 }
                 else
                 {
@@ -337,134 +488,7 @@ namespace StageManagerApp
             }
         }
 
-        // 白皮书规则 1：从左侧长廊“唤醒”任务
-        public async void SwitchToStage(StageGroup targetGroup)
-        {
-            if (ActiveStage == targetGroup) return;
-            if (_isSwitching) return;
-            
-            _isSwitching = true;
-            try
-            {
-                BackgroundGroups.Remove(targetGroup);
-                PushActiveStageToBackground();
-                
-                ActiveStage = targetGroup;
-
-                await RestoreStageGroupAsync(targetGroup);
-            }
-            catch (Exception ex)
-            {
-                _logger.Error(ex, "Exception in SwitchToStage");
-            }
-            finally
-            {
-                _isSwitching = false;
-            }
-        }
-
-        // 白皮书规则 2：跨应用自由组合
-        public async void GroupWithStage(StageGroup targetGroup)
-        {
-            if (ActiveStage == null)
-            {
-                SwitchToStage(targetGroup);
-                return;
-            }
-            if (ActiveStage == targetGroup) return;
-            if (_isSwitching) return;
-            
-            _isSwitching = true;
-            try
-            {
-                BackgroundGroups.Remove(targetGroup);
-                ActiveStage.Windows.AddRange(targetGroup.Windows);
-                
-                await RestoreStageGroupAsync(targetGroup);
-            }
-            catch (Exception ex)
-            {
-                _logger.Error(ex, "Exception in GroupWithStage");
-            }
-            finally
-            {
-                _isSwitching = false;
-            }
-        }
-
-        private async Task RestoreStageGroupAsync(StageGroup targetGroup)
-        {
-            // 给 UI 引擎留出 50 毫秒的时间去销毁缩略图，彻底解决黑框闪烁问题
-            await Task.Delay(50);
-
-            if (targetGroup.Windows.Count == 0) return;
-
-            if (targetGroup.Windows.Count == 1)
-            {
-                var win = targetGroup.Windows[0];
-                Win32.ShowWindow(win.Hwnd, Win32.SW_RESTORE);
-                Win32.SetForegroundWindow(win.Hwnd);
-            }
-            else
-            {
-                // 按照窗口面积降序排列（大的垫底，小的在最顶上）
-                int wpSize = System.Runtime.InteropServices.Marshal.SizeOf<Win32.WINDOWPLACEMENT>();
-                targetGroup.Windows.Sort((a, b) =>
-                {
-                    Win32.WINDOWPLACEMENT wpA = new Win32.WINDOWPLACEMENT { length = wpSize };
-                    Win32.GetWindowPlacement(a.Hwnd, ref wpA);
-                    long areaA = (wpA.rcNormalPosition.Right - wpA.rcNormalPosition.Left) * (wpA.rcNormalPosition.Bottom - wpA.rcNormalPosition.Top);
-
-                    Win32.WINDOWPLACEMENT wpB = new Win32.WINDOWPLACEMENT { length = wpSize };
-                    Win32.GetWindowPlacement(b.Hwnd, ref wpB);
-                    long areaB = (wpB.rcNormalPosition.Right - wpB.rcNormalPosition.Left) * (wpB.rcNormalPosition.Bottom - wpB.rcNormalPosition.Top);
-
-                    return areaB.CompareTo(areaA);
-                });
-
-                // 将最小的窗口设为焦点
-                var smallest = targetGroup.Windows.LastOrDefault();
-                if (smallest != null)
-                {
-                    targetGroup.PrimaryHwnd = smallest.Hwnd;
-                    if (smallest.Icon != null) targetGroup.Icon = smallest.Icon;
-                }
-
-                IntPtr hdwp = Win32.BeginDeferWindowPos(targetGroup.Windows.Count);
-                if (hdwp != IntPtr.Zero)
-                {
-                    // 反向遍历：从最小的(最后面的)开始放到顶部
-                    IntPtr insertAfter = Win32.HWND_TOP;
-                    
-                    foreach (var win in targetGroup.Windows.AsEnumerable().Reverse())
-                    {
-                        // 先以无焦点方式恢复窗口
-                        Win32.ShowWindow(win.Hwnd, Win32.SW_SHOWNOACTIVATE);
-                        // 然后通过 DeferWindowPos 设置层级
-                        hdwp = Win32.DeferWindowPos(hdwp, win.Hwnd, insertAfter, 0, 0, 0, 0, Win32.SWP_NOMOVE | Win32.SWP_NOSIZE | Win32.SWP_NOACTIVATE);
-                        if (hdwp == IntPtr.Zero) break;
-                        insertAfter = win.Hwnd; // 保证下一个（较大的）窗口压在当前窗口下面
-                    }
-
-                    if (hdwp != IntPtr.Zero)
-                    {
-                        Win32.EndDeferWindowPos(hdwp);
-                    }
-                }
-                else
-                {
-                    // Fallback
-                    foreach (var win in targetGroup.Windows)
-                    {
-                        Win32.ShowWindow(win.Hwnd, Win32.SW_RESTORE);
-                    }
-                }
-                
-                Win32.SetForegroundWindow(targetGroup.PrimaryHwnd);
-            }
-
-            await Task.Delay(100); // 让 UI 和系统的焦点消息飞一会儿
-        }
+        // Duplicate methods removed.
 
         private Dictionary<string, ImageSource> _exeIconCache = new(StringComparer.OrdinalIgnoreCase);
         private List<string> _exeIconCacheKeys = new List<string>();

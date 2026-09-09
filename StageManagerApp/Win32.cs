@@ -45,6 +45,13 @@ namespace StageManagerApp
 
         [LibraryImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
+        public static partial bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+        public const uint WM_SYSCOMMAND = 0x0112;
+        public const int SC_MINIMIZE = 0xF020;
+
+        [LibraryImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
         public static partial bool EnumWindows(EnumWindowsProc enumProc, IntPtr lParam);
         public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
@@ -80,6 +87,9 @@ namespace StageManagerApp
         [LibraryImport("dwmapi.dll")]
         public static partial int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out int pvAttribute, int cbAttribute);
 
+        [LibraryImport("dwmapi.dll")]
+        public static partial int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out RECT pvAttribute, int cbAttribute);
+
         [LibraryImport("user32.dll", EntryPoint = "RegisterWindowMessageW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
         public static partial uint RegisterWindowMessage(string lpString);
 
@@ -97,6 +107,10 @@ namespace StageManagerApp
         [LibraryImport("user32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static partial bool SetForegroundWindow(IntPtr hWnd);
+
+        [LibraryImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static partial bool GetCursorPos(out POINT lpPoint);
 
         [LibraryImport("user32.dll", SetLastError = true)]
         public static partial IntPtr BeginDeferWindowPos(int nNumWindows);
@@ -129,7 +143,8 @@ namespace StageManagerApp
         public const int WS_EX_TOOLWINDOW = 0x00000080;
         public const int WS_EX_APPWINDOW = 0x00040000;
         public const int WS_EX_NOACTIVATE = 0x08000000;
-        public const uint GW_OWNER = 4;
+        public const int GW_OWNER = 4;
+        public const int DWMWA_EXTENDED_FRAME_BOUNDS = 9;
         public const int DWMWA_CLOAKED = 14;
 
         public const int HSHELL_WINDOWCREATED = 1;
@@ -137,16 +152,23 @@ namespace StageManagerApp
         public const int HSHELL_ACTIVATESHELLWINDOW = 3;
         public const int HSHELL_WINDOWACTIVATED = 4;
 
-        public const int SW_MINIMIZE = 6;
-        public const int SW_RESTORE = 9;
+        public const int SW_HIDE = 0;
+        public const int SW_SHOWMAXIMIZED = 3;
         public const int SW_SHOWNOACTIVATE = 4;
-        
+        public const int SW_MINIMIZE = 6;
+        public const int SW_SHOWMINNOACTIVE = 7;
+        public const int SW_RESTORE = 9;
+        public const int SW_FORCEMINIMIZE = 11;
         public const int GCLP_HICON = -14;
 
 
         [LibraryImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static partial bool GetWindowPlacement(IntPtr hWnd, ref WINDOWPLACEMENT lpwndpl);
+
+        [LibraryImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static partial bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
 
         [StructLayout(LayoutKind.Sequential)]
         public struct WINDOWPLACEMENT
