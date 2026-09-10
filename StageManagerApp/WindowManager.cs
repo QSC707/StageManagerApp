@@ -137,14 +137,15 @@ namespace StageManagerApp
                 return;
             }
 
+            // 先在 UI 层面原子级移除目标分组，并推入当前活跃分组，消除视觉抖动
+            BackgroundGroups.Remove(targetGroup);
+
             if (ActiveStage.Windows.Count > 0)
             {
                 PushActiveStageToBackground();
-                // 核心优化：将延迟设为 60 毫秒
+                // 等待底层动画错峰，避免窗口 DWM 动画重叠
                 await Task.Delay(60);
             }
-
-            BackgroundGroups.Remove(targetGroup);
 
             ActiveStage.Id = targetGroup.Id;
             ActiveStage.Windows = targetGroup.Windows.ToList();
@@ -157,25 +158,13 @@ namespace StageManagerApp
             _isSwitching = false;
         }
 
-        public async void ExtractWindowFromGroup(StageGroup sourceGroup, WindowInfo targetWin)
+        public async void ExtractWindowFromGroup(StageGroup sourceGroup, WindowInfo targetWin, bool breakOut = false)
         {
-            Log.Information($"[ExtractWindowFromGroup] Extracting {targetWin.Hwnd} from group {sourceGroup.Id}");
+            Log.Information($"[ExtractWindowFromGroup] Extracting {targetWin.Hwnd} from group {sourceGroup.Id}. BreakOut: {breakOut}");
             if (_isSwitching) return;
             _isSwitching = true;
 
-            if (ActiveStage.Windows.Count > 0)
-            {
-                PushActiveStageToBackground();
-                // 核心优化：将延迟设为 75 毫秒
-                await Task.Delay(75);
-            }
-
-            // 完全拆分为独立的新分组，赋予全新 ID，防止之后又被错误合并！
-            ActiveStage.Id = Guid.NewGuid();
-            ActiveStage.Windows = new List<WindowInfo> { targetWin };
-            ActiveStage.PrimaryHwnd = targetWin.Hwnd;
-            ActiveStage.Icon = targetWin.Icon;
-
+            // 先更新源分组 UI，如果在桌面上，原子的推入后台，消除视觉抖动
             var newList = sourceGroup.Windows.ToList();
             newList.Remove(targetWin);
             sourceGroup.Windows = newList;
@@ -184,6 +173,24 @@ namespace StageManagerApp
             {
                 BackgroundGroups.Remove(sourceGroup);
             }
+
+            if (ActiveStage.Windows.Count > 0)
+            {
+                PushActiveStageToBackground();
+                await Task.Delay(75);
+            }
+
+            if (breakOut)
+            {
+                ActiveStage.Id = Guid.NewGuid();
+            }
+            else
+            {
+                ActiveStage.Id = sourceGroup.Id;
+            }
+            ActiveStage.Windows = new List<WindowInfo> { targetWin };
+            ActiveStage.PrimaryHwnd = targetWin.Hwnd;
+            ActiveStage.Icon = targetWin.Icon;
 
             if (Win32.IsIconic(targetWin.Hwnd))
             {
@@ -361,12 +368,26 @@ namespace StageManagerApp
             {
                 if (ActiveStage != null && ActiveStage.Windows.Count > 0)
                 {
-                    var newList = ActiveStage.Windows.ToList();
-                    newList.Add(newWin);
-                    ActiveStage.Windows = newList;
-                    
-                    ActiveStage.PrimaryHwnd = newWin.Hwnd;
-                    if (newWin.Icon != null) ActiveStage.Icon = newWin.Icon;
+                    if (App.IsIndependentNewWindowMode)
+                    {
+                        Log.Information($"[New Window] Independent Mode: Pushing current stage {ActiveStage.Id} to background.");
+                        PushActiveStageToBackground();
+                        
+                        ActiveStage.Id = Guid.NewGuid();
+                        ActiveStage.Windows = [newWin];
+                        ActiveStage.PrimaryHwnd = newWin.Hwnd;
+                        ActiveStage.Icon = newWin.Icon;
+                    }
+                    else
+                    {
+                        Log.Information($"[New Window] Merge Mode: Adding new window to current stage {ActiveStage.Id}.");
+                        var newList = ActiveStage.Windows.ToList();
+                        newList.Add(newWin);
+                        ActiveStage.Windows = newList;
+                        
+                        ActiveStage.PrimaryHwnd = newWin.Hwnd;
+                        if (newWin.Icon != null) ActiveStage.Icon = newWin.Icon;
+                    }
                 }
                 else
                 {
@@ -401,9 +422,10 @@ namespace StageManagerApp
             {
                 if (Win32.IsWindowVisible(win.Hwnd) && !Win32.IsIconic(win.Hwnd))
                 {
-                    // 放弃发送消息的破坏性方案，使用微软官方专门提供的异线程强制最小化标志 (SW_FORCEMINIMIZE)
-                    // 它专门用来在不影响目标程序内部逻辑的情况下，强制将其最小化（对相册等 UWP 应用完美生效且安全）
-                    Win32.ShowWindow(win.Hwnd, Win32.SW_FORCEMINIMIZE);
+                    // 对于 Obsidian、Spotify 等使用无边框或自绘引擎 (Chromium/Electron) 的应用，
+                    // SW_FORCEMINIMIZE 有时会导致其内部状态机不同步并拒绝最小化。
+                    // 改用最正统的异步发消息方式，模拟用户点击最小化按钮，这样最稳定。
+                    Win32.PostMessage(win.Hwnd, Win32.WM_SYSCOMMAND, (IntPtr)Win32.SC_MINIMIZE, IntPtr.Zero);
                 }
             }
 
@@ -463,7 +485,11 @@ namespace StageManagerApp
                 }
                 else
                 {
-                    if (group.PrimaryHwnd == hWnd) group.PrimaryHwnd = group.Windows[0].Hwnd;
+                    if (group.PrimaryHwnd == hWnd) 
+                    {
+                        group.PrimaryHwnd = group.Windows[0].Hwnd;
+                        group.Icon = group.Windows[0].Icon;
+                    }
                 }
             }
 
@@ -483,7 +509,11 @@ namespace StageManagerApp
                 }
                 else
                 {
-                    if (ActiveStage.PrimaryHwnd == hWnd) ActiveStage.PrimaryHwnd = ActiveStage.Windows[0].Hwnd;
+                    if (ActiveStage.PrimaryHwnd == hWnd) 
+                    {
+                        ActiveStage.PrimaryHwnd = ActiveStage.Windows[0].Hwnd;
+                        ActiveStage.Icon = ActiveStage.Windows[0].Icon;
+                    }
                 }
             }
         }

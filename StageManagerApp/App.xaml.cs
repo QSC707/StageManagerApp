@@ -12,6 +12,7 @@ namespace StageManagerApp;
 /// </summary>
 public partial class App : Application
 {
+    public static bool IsIndependentNewWindowMode { get; set; } = true;
     private System.Windows.Forms.NotifyIcon? _notifyIcon;
 
     protected override void OnStartup(StartupEventArgs e)
@@ -40,6 +41,20 @@ public partial class App : Application
         };
         
         var contextMenu = new System.Windows.Forms.ContextMenuStrip();
+        
+        var modeItem = new System.Windows.Forms.ToolStripMenuItem("新窗口独立分组 (Independent New Windows)")
+        {
+            CheckOnClick = true,
+            Checked = IsIndependentNewWindowMode
+        };
+        modeItem.CheckedChanged += (s, args) => 
+        {
+            IsIndependentNewWindowMode = modeItem.Checked;
+            Log.Information($"[Settings] IsIndependentNewWindowMode changed to {IsIndependentNewWindowMode}");
+        };
+        contextMenu.Items.Add(modeItem);
+        contextMenu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
+
         var exitItem = new System.Windows.Forms.ToolStripMenuItem("退出 (Exit)");
         exitItem.Click += (s, args) => Current.Shutdown();
         contextMenu.Items.Add(exitItem);

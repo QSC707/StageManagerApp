@@ -85,6 +85,22 @@ namespace StageManagerApp
         public static partial uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 
         [LibraryImport("dwmapi.dll")]
+        public static partial int DwmSetWindowAttribute(IntPtr hwnd, int dwAttribute, ref int pvAttribute, int cbAttribute);
+
+        public delegate void WinEventDelegate(IntPtr hWinEventHook, uint eventType, IntPtr hwnd, int idObject, int idChild, uint dwEventThread, uint dwmsEventTime);
+
+        [DllImport("user32.dll")]
+        public static extern IntPtr SetWinEventHook(uint eventMin, uint eventMax, IntPtr hmodWinEventProc, WinEventDelegate lpfnWinEventProc, uint idProcess, uint idThread, uint dwFlags);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool UnhookWinEvent(IntPtr hWinEventHook);
+
+        public const uint EVENT_OBJECT_LOCATIONCHANGE = 0x800B;
+        public const uint WINEVENT_OUTOFCONTEXT = 0;
+        public const int OBJID_WINDOW = 0;
+
+        [LibraryImport("dwmapi.dll")]
         public static partial int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out int pvAttribute, int cbAttribute);
 
         [LibraryImport("dwmapi.dll")]

@@ -6,7 +6,7 @@
         WindowStyle="None" AllowsTransparency="True" Background="Transparent"
         Topmost="True" ShowInTaskbar="False" ResizeMode="NoResize"
         Loaded="Window_Loaded" Closed="Window_Closed">
-    <Grid Background="#01000000">
+    <Grid Background="{x:Null}">
         <ScrollViewer VerticalAlignment="Center" Margin="0,60,0,60" VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Disabled">
             <ItemsControl x:Name="ThumbnailsList">
                 <ItemsControl.ItemTemplate>
