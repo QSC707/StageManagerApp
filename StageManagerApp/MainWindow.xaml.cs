@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Controls;
@@ -11,16 +12,9 @@ namespace StageManagerApp
     {
         private WindowManager _windowManager;
 
-        private bool _isObscured = false;
         private bool _isHovered = false;
         private double _visibleLeft;
         private double _hiddenLeft;
-
-        // 缓存长廊的物理像素边界，避免在每次事件中重复计算
-        private int _cachedMyLeft;
-        private int _cachedCriticalRight;
-        private int _cachedMyTop;
-        private int _cachedMyBottom;
 
         public MainWindow()
         {
@@ -32,12 +26,7 @@ namespace StageManagerApp
             this.MouseLeave += MainWindow_MouseLeave;
 
             _windowManager.OnForegroundWindowChangedEvent += WindowManager_OnForegroundWindowChangedEvent;
-
-            _winEventDelegate = new Win32.WinEventDelegate(WinEventProc);
         }
-
-        private Win32.WinEventDelegate _winEventDelegate;
-        private IntPtr _locationChangeHook;
 
         private void Window_Loaded(object sender, RoutedEventArgs e)
         {
@@ -56,28 +45,17 @@ namespace StageManagerApp
             _windowManager.Initialize();
             ThumbnailsList.ItemsSource = _windowManager.BackgroundGroups;
 
-            // 预先计算长廊的物理像素边界，实现最高性能的碰撞检测
-            var src = PresentationSource.FromVisual(this);
-            double dpiX = src?.CompositionTarget?.TransformToDevice.M11 ?? 1.0;
-            double dpiY = src?.CompositionTarget?.TransformToDevice.M22 ?? 1.0;
+            _locChangeDelegate = new Win32.WinEventDelegate(WinEventCallback);
+            _occlusionTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
+            _occlusionTimer.Tick += (s, args) => {
+                _occlusionTimer.Stop();
+                CheckOcclusion();
+            };
+            
+            IntPtr fg = Win32.GetForegroundWindow();
+            if (fg != IntPtr.Zero) WindowManager_OnForegroundWindowChangedEvent(fg);
 
-            _cachedMyLeft = (int)(_visibleLeft * dpiX);
-            int criticalWidth = 130;
-            _cachedCriticalRight = (int)((_visibleLeft + criticalWidth) * dpiX);
-            _cachedMyTop = (int)(this.Top * dpiY);
-            _cachedMyBottom = (int)((this.Top + this.Height) * dpiY);
-
-            // 注册真正的帧同步回调
-            System.Windows.Media.CompositionTarget.Rendering += CompositionTarget_Rendering;
-        }
-
-        private void CompositionTarget_Rendering(object? sender, EventArgs e)
-        {
-            if (_isOcclusionDirty)
-            {
-                _isOcclusionDirty = false;
-                CheckOcclusion(_currentForegroundHwnd);
-            }
+            UpdateVisibilityState();
         }
 
         private void MainWindow_MouseEnter(object sender, MouseEventArgs e)
@@ -93,203 +71,128 @@ namespace StageManagerApp
         }
 
         private IntPtr _currentForegroundHwnd;
-        private uint _currentThreadId;
-        private long _hookGeneration;
-        private bool _isOcclusionDirty;
-
-        // 性能诊断计数器
-        private int _rawEventCount = 0;
-        private int _coalescedComputeCount = 0;
-        private DateTime _lastLogTime = DateTime.Now;
-
-        private void WinEventProc(IntPtr hWinEventHook, uint eventType, IntPtr hwnd, int idObject, int idChild, uint dwEventThread, uint dwmsEventTime)
-        {
-            if (idObject != Win32.OBJID_WINDOW) return;
-            if (hwnd != _currentForegroundHwnd) return;
-
-            System.Threading.Interlocked.Increment(ref _rawEventCount);
-            long currentGeneration = _hookGeneration;
-
-            // 事件合并 (Coalescing)：只标记脏状态，推迟到真实的渲染帧 (CompositionTarget.Rendering) 执行
-            if (!_isOcclusionDirty)
-            {
-                _isOcclusionDirty = true;
-                // 这里我们不再使用 Dispatcher.InvokeAsync，因为它会被 UI 线程瞬间消化，导致一秒执行几百次。
-                // 而是依赖 CompositionTarget_Rendering 在显示器刷新时统一收割。
-            }
-        }
+        private Win32.WinEventDelegate? _locChangeDelegate;
+        private IntPtr _winEventHook;
+        private System.Windows.Threading.DispatcherTimer _occlusionTimer;
+        private bool _isOccluded;
 
         private void WindowManager_OnForegroundWindowChangedEvent(IntPtr foregroundHwnd)
         {
             this.Dispatcher.InvokeAsync(() =>
             {
                 _currentForegroundHwnd = foregroundHwnd;
-                long newGeneration = ++_hookGeneration;
-                
-                if (foregroundHwnd != IntPtr.Zero)
-                {
-                    uint threadId = Win32.GetWindowThreadProcessId(foregroundHwnd, out uint processId);
-                    
-                    // 极致优化：如果新窗口和老窗口属于同一个线程，复用现有的 Hook，直接返回！
-                    if (threadId == _currentThreadId && _locationChangeHook != IntPtr.Zero)
-                    {
-                        Log.Information("[HOOK] 焦点切换，复用同一线程 Hook (TID: {ThreadId})", threadId);
-                        CheckOcclusion(foregroundHwnd);
-                        return;
-                    }
-
-                    Log.Information("[HOOK] 跨线程焦点切换 (旧TID: {OldTID} -> 新TID: {NewTID})，重建 Hook", _currentThreadId, threadId);
-
-                    // 否则，销毁旧的 Hook，创建新的
-                    if (_locationChangeHook != IntPtr.Zero)
-                    {
-                        Win32.UnhookWinEvent(_locationChangeHook);
-                        _locationChangeHook = IntPtr.Zero;
-                    }
-
-                    _currentThreadId = threadId;
-
-                    if (threadId != 0 && processId != 0)
-                    {
-                        _locationChangeHook = Win32.SetWinEventHook(
-                            Win32.EVENT_OBJECT_LOCATIONCHANGE,
-                            Win32.EVENT_OBJECT_LOCATIONCHANGE,
-                            IntPtr.Zero,
-                            _winEventDelegate,
-                            processId, threadId,
-                            Win32.WINEVENT_OUTOFCONTEXT);
-                    }
-                }
-                else
-                {
-                    if (_locationChangeHook != IntPtr.Zero)
-                    {
-                        Win32.UnhookWinEvent(_locationChangeHook);
-                        _locationChangeHook = IntPtr.Zero;
-                    }
-                    _currentThreadId = 0;
-                }
-
-                CheckOcclusion(foregroundHwnd);
+                UpdateForegroundHook();
+                CheckOcclusion();
             });
         }
 
-        private void CheckOcclusion(IntPtr foregroundHwnd)
+        private void UpdateForegroundHook()
         {
-            var sw = System.Diagnostics.Stopwatch.StartNew();
-            System.Threading.Interlocked.Increment(ref _coalescedComputeCount);
-
-            // 每秒打印一次性能报告
-            if ((DateTime.Now - _lastLogTime).TotalSeconds >= 1.0)
+            if (_winEventHook != IntPtr.Zero)
             {
-                int raw = _rawEventCount;
-                int computed = _coalescedComputeCount;
-                Log.Information("[PERF] 过去1秒 -> 拦截原始事件: {RawCount} 次 | 实际合并计算: {ComputedCount} 次 | 阻挡了 {BlockedCount} 次冗余计算!", raw, computed, raw - computed);
-                _rawEventCount = 0;
-                _coalescedComputeCount = 0;
-                _lastLogTime = DateTime.Now;
+                Win32.UnhookWinEvent(_winEventHook);
+                _winEventHook = IntPtr.Zero;
             }
 
-            bool newObscured = false;
-
-            if (foregroundHwnd == IntPtr.Zero || foregroundHwnd == new System.Windows.Interop.WindowInteropHelper(this).Handle) 
+            if (_currentForegroundHwnd != IntPtr.Zero)
             {
-                newObscured = false;
-            }
-            else
-            {
-                // 过滤掉桌面和任务栏的点击
-                bool isDesktop = false;
-                unsafe
+                uint threadId = Win32.GetWindowThreadProcessId(_currentForegroundHwnd, out uint processId);
+                if (threadId != 0)
                 {
-                    char* buffer = stackalloc char[256];
-                    int len = Win32.GetClassName(foregroundHwnd, buffer, 256);
-                    if (len > 0)
+                    _winEventHook = Win32.SetWinEventHook(
+                        Win32.EVENT_OBJECT_LOCATIONCHANGE, 
+                        Win32.EVENT_OBJECT_LOCATIONCHANGE, 
+                        IntPtr.Zero, 
+                        _locChangeDelegate!, 
+                        processId, 
+                        threadId, 
+                        Win32.WINEVENT_OUTOFCONTEXT);
+                }
+            }
+        }
+
+        private void WinEventCallback(IntPtr hWinEventHook, uint eventType, IntPtr hwnd, int idObject, int idChild, uint dwEventThread, uint dwmsEventTime)
+        {
+            if (idObject != 0 /* OBJID_WINDOW */) return;
+            _occlusionTimer.Stop();
+            _occlusionTimer.Start();
+        }
+
+        private void CheckOcclusion()
+        {
+            if (_currentForegroundHwnd == IntPtr.Zero)
+            {
+                SetOccluded(false);
+                return;
+            }
+
+            Span<char> buffer = stackalloc char[256];
+            int len = Win32.GetClassName(_currentForegroundHwnd, buffer, 256);
+            if (len > 0)
+            {
+                ReadOnlySpan<char> span = buffer.Slice(0, len);
+                if (span is "Progman" or "WorkerW" or "Shell_TrayWnd")
+                {
+                    SetOccluded(false);
+                    return;
+                }
+            }
+
+            // 获取窗口状态，判断是否最大化或全屏
+            Win32.WINDOWPLACEMENT placement = new Win32.WINDOWPLACEMENT();
+            placement.length = Marshal.SizeOf(typeof(Win32.WINDOWPLACEMENT));
+            if (Win32.GetWindowPlacement(_currentForegroundHwnd, ref placement))
+            {
+                bool isMaximized = placement.showCmd == Win32.SW_SHOWMAXIMIZED;
+                
+                // 补充判断：部分无边框窗口全屏时（如视频全屏、游戏全屏），并非标准的最大化状态，
+                // 此时其窗口大小等于屏幕/工作区大小。
+                if (!isMaximized && Win32.GetWindowRect(_currentForegroundHwnd, out Win32.RECT rect))
+                {
+                    var workArea = SystemParameters.WorkArea;
+                    if (rect.Left <= 0 && rect.Top <= 0 && 
+                        (rect.Right - rect.Left) >= workArea.Width && 
+                        (rect.Bottom - rect.Top) >= workArea.Height)
                     {
-                        var span = new ReadOnlySpan<char>(buffer, len);
-                        if (span is "Progman" or "WorkerW" or "Shell_TrayWnd")
-                        {
-                            isDesktop = true;
-                        }
+                        isMaximized = true; // 视为全屏遮挡
                     }
                 }
 
-                if (isDesktop)
-                {
-                    newObscured = false;
-                }
-                else
-                {
-                    int wpSize = System.Runtime.InteropServices.Marshal.SizeOf<Win32.WINDOWPLACEMENT>();
-                    Win32.WINDOWPLACEMENT wp = new Win32.WINDOWPLACEMENT { length = wpSize };
-                    if (Win32.GetWindowPlacement(foregroundHwnd, ref wp))
-                    {
-                        if (wp.showCmd == Win32.SW_SHOWMAXIMIZED)
-                        {
-                            newObscured = true;
-                        }
-                        else if (wp.showCmd == Win32.SW_MINIMIZE || wp.showCmd == Win32.SW_SHOWMINNOACTIVE)
-                        {
-                            newObscured = false; // 最小化的窗口不可能遮挡
-                        }
-                        else
-                        {
-                            Win32.RECT rect = new Win32.RECT();
-                            int hr = Win32.DwmGetWindowAttribute(foregroundHwnd, Win32.DWMWA_EXTENDED_FRAME_BOUNDS, out rect, System.Runtime.InteropServices.Marshal.SizeOf<Win32.RECT>());
-                            if (hr != 0)
-                            {
-                                Win32.GetWindowRect(foregroundHwnd, out rect);
-                            }
-                            
-                            bool intersectX = rect.Left < _cachedCriticalRight && rect.Right > _cachedMyLeft;
-                            bool intersectY = rect.Top < _cachedMyBottom && rect.Bottom > _cachedMyTop;
-                            
-                            newObscured = intersectX && intersectY;
-                        }
-                    }
-                }
+                SetOccluded(isMaximized);
             }
+        }
 
-            if (_isObscured != newObscured)
+        private void SetOccluded(bool occluded)
+        {
+            if (_isOccluded != occluded)
             {
-                _isObscured = newObscured;
-                if (_isObscured)
-                {
-                    _isHovered = false; // 强制清除悬停状态，让长廊立刻躲避
-                }
+                _isOccluded = occluded;
                 UpdateVisibilityState();
-                Log.Information("[STATE] 长廊遮挡状态变更 -> {IsObscured}", _isObscured);
-            }
-
-            sw.Stop();
-            if (sw.ElapsedTicks > 10000) // 只打印耗时较长的计算，10000 ticks = 1ms
-            {
-                Log.Warning("[PERF] CheckOcclusion 耗时异常: {ElapsedMs} ms", sw.Elapsed.TotalMilliseconds);
             }
         }
 
         private void UpdateVisibilityState()
         {
-            double targetLeft = (_isHovered || !_isObscured || _isDragging) ? _visibleLeft : _hiddenLeft;
+            bool isVisible = _isHovered || _isDragging || !_isOccluded;
+            double targetLeft = isVisible ? _visibleLeft : _hiddenLeft;
             
             var anim = new System.Windows.Media.Animation.DoubleAnimation
             {
                 To = targetLeft,
-                Duration = TimeSpan.FromMilliseconds(250),
-                EasingFunction = new System.Windows.Media.Animation.QuadraticEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut }
+                Duration = TimeSpan.FromMilliseconds(150),
+                EasingFunction = new System.Windows.Media.Animation.CubicEase { EasingMode = isVisible ? System.Windows.Media.Animation.EasingMode.EaseOut : System.Windows.Media.Animation.EasingMode.EaseIn }
             };
             this.BeginAnimation(Window.LeftProperty, anim);
         }
 
         private void Window_Closed(object sender, EventArgs e)
         {
-            System.Windows.Media.CompositionTarget.Rendering -= CompositionTarget_Rendering;
-            if (_locationChangeHook != IntPtr.Zero)
+            if (_winEventHook != IntPtr.Zero)
             {
-                Win32.UnhookWinEvent(_locationChangeHook);
-                _locationChangeHook = IntPtr.Zero;
+                Win32.UnhookWinEvent(_winEventHook);
+                _winEventHook = IntPtr.Zero;
             }
-            _windowManager.Shutdown();
+            _windowManager.Dispose();
         }
 
         private Point _dragStartPoint;
@@ -336,6 +239,8 @@ namespace StageManagerApp
                     {
                         Log.Information($"[UI Click] Drag end on group {group.Id}, calling GroupWithStage");
                         _windowManager.GroupWithStage(group);
+                        _isHovered = false;
+                        UpdateVisibilityState();
                     }
                     UpdateVisibilityState(); // 拖拽结束后重新评估可见性
                 }
@@ -352,6 +257,10 @@ namespace StageManagerApp
                         Log.Information($"[UI Click] Click on group {group.Id}, calling SwitchToStage");
                         _windowManager.SwitchToStage(group);
                     }
+                    
+                    // 点击目标后，立刻强制收起侧边栏
+                    _isHovered = false;
+                    UpdateVisibilityState();
                 }
             }
         }
@@ -378,6 +287,10 @@ namespace StageManagerApp
                         Log.Information($"[UI Click] Click icon. Extracting window (BreakOut: false) to keep folder link.");
                         _windowManager.ExtractWindowFromGroup(group, winInfo, breakOut: false);
                     }
+                    
+                    // 点击目标后，立刻强制收起侧边栏
+                    _isHovered = false;
+                    UpdateVisibilityState();
                 }
             }
         }

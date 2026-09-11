@@ -43,9 +43,9 @@ namespace StageManagerApp
         [LibraryImport("dwmapi.dll")]
         public static partial int DwmQueryThumbnailSourceSize(IntPtr thumb, out PSIZE size);
 
-        [LibraryImport("user32.dll")]
+        [DllImport("user32.dll", EntryPoint = "PostMessageW", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
-        public static partial bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+        public static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
 
         public const uint WM_SYSCOMMAND = 0x0112;
         public const int SC_MINIMIZE = 0xF020;
@@ -70,7 +70,7 @@ namespace StageManagerApp
 
 
         [LibraryImport("user32.dll", EntryPoint = "GetClassNameW", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
-        public static unsafe partial int GetClassName(IntPtr hWnd, char* lpClassName, int nMaxCount);
+        public static partial int GetClassName(IntPtr hWnd, Span<char> lpClassName, int nMaxCount);
 
         [DllImport("user32.dll", SetLastError = true)]
         public static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
@@ -178,9 +178,9 @@ namespace StageManagerApp
         public const int GCLP_HICON = -14;
 
 
-        [LibraryImport("user32.dll")]
+        [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
-        public static partial bool GetWindowPlacement(IntPtr hWnd, ref WINDOWPLACEMENT lpwndpl);
+        public static extern bool GetWindowPlacement(IntPtr hWnd, ref WINDOWPLACEMENT lpwndpl);
 
         [LibraryImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
@@ -219,9 +219,9 @@ namespace StageManagerApp
         
         public const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
 
-        [LibraryImport("kernel32.dll", EntryPoint = "QueryFullProcessImageNameW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+        [LibraryImport("kernel32.dll", EntryPoint = "QueryFullProcessImageNameW", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
-        public static unsafe partial bool QueryFullProcessImageName(IntPtr hProcess, uint dwFlags, char* lpExeName, ref uint lpdwSize);
+        public static partial bool QueryFullProcessImageName(IntPtr hProcess, uint dwFlags, Span<char> lpExeName, ref uint lpdwSize);
 
         [LibraryImport("kernel32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]

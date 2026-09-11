@@ -45,7 +45,7 @@ namespace StageManagerApp
         }
     }
 
-    public class WindowManager
+    public class WindowManager : IDisposable
     {
         private static readonly uint CurrentPid = (uint)Process.GetCurrentProcess().Id;
         private uint _wmShellHook;
@@ -86,7 +86,7 @@ namespace StageManagerApp
             PopulateInitialState();
         }
 
-        public void Shutdown()
+        public void Dispose()
         {
             Log.Information("Shutting down WindowManager...");
             if (_msgHwnd != IntPtr.Zero)
@@ -132,7 +132,7 @@ namespace StageManagerApp
 
                 await RestoreStageGroupAsync(targetGroup);
                 
-                await Task.Delay(200);
+                await Task.Delay(30);
                 _isSwitching = false;
                 return;
             }
@@ -143,8 +143,6 @@ namespace StageManagerApp
             if (ActiveStage.Windows.Count > 0)
             {
                 PushActiveStageToBackground();
-                // 等待底层动画错峰，避免窗口 DWM 动画重叠
-                await Task.Delay(60);
             }
 
             ActiveStage.Id = targetGroup.Id;
@@ -154,7 +152,7 @@ namespace StageManagerApp
 
             await RestoreStageGroupAsync(ActiveStage);
 
-            await Task.Delay(200);
+            await Task.Delay(30);
             _isSwitching = false;
         }
 
@@ -177,7 +175,6 @@ namespace StageManagerApp
             if (ActiveStage.Windows.Count > 0)
             {
                 PushActiveStageToBackground();
-                await Task.Delay(75);
             }
 
             if (breakOut)
@@ -198,7 +195,7 @@ namespace StageManagerApp
             }
             Win32.SetForegroundWindow(targetWin.Hwnd);
 
-            await Task.Delay(200);
+            await Task.Delay(30);
             _isSwitching = false;
         }
 
@@ -229,12 +226,14 @@ namespace StageManagerApp
 
             Win32.EnumWindows((hWnd, _) =>
             {
+                Log.Information($"[PopulateInitialState] EnumWindows hWnd: {hWnd}");
                 if (IsValidStageWindow(hWnd, out var win) && win != null)
                 {
                     validWindows.Add(win);
                 }
                 return true;
             }, IntPtr.Zero);
+            Log.Information($"[PopulateInitialState] EnumWindows completed. Valid windows: {validWindows.Count}");
 
             foreach (var win in validWindows)
             {
@@ -340,15 +339,12 @@ namespace StageManagerApp
             if (!IsValidStageWindow(hWnd, out var newWin) || newWin == null)
             {
                 bool isDesktop = false;
-                unsafe
+                Span<char> buffer = stackalloc char[256];
+                int len = Win32.GetClassName(hWnd, buffer, 256);
+                if (len > 0) 
                 {
-                    char* buffer = stackalloc char[256];
-                    int len = Win32.GetClassName(hWnd, buffer, 256);
-                    if (len > 0) 
-                    {
-                        ReadOnlySpan<char> span = new ReadOnlySpan<char>(buffer, len);
-                        if (span is "Progman" or "WorkerW") isDesktop = true;
-                    }
+                    ReadOnlySpan<char> span = buffer.Slice(0, len);
+                    if (span is "Progman" or "WorkerW") isDesktop = true;
                 }
                 
                 if (isDesktop)
@@ -531,13 +527,12 @@ namespace StageManagerApp
             if (hProcess != IntPtr.Zero)
             {
                 uint size = 1024;
-                unsafe
+                Span<char> buffer = stackalloc char[1024];
+                if (Win32.QueryFullProcessImageName(hProcess, 0, buffer, ref size) && size > 0)
                 {
-                    char* buffer = stackalloc char[1024];
-                    if (Win32.QueryFullProcessImageName(hProcess, 0, buffer, ref size) && size > 0)
-                    {
-                        Win32.CloseHandle(hProcess);
-                        ReadOnlySpan<char> span = new ReadOnlySpan<char>(buffer, (int)size);
+                    Win32.CloseHandle(hProcess);
+                    ReadOnlySpan<char> span = buffer.Slice(0, (int)size);
+                    Log.Information($"[ExtractWindowIcon] Processing path: {span.ToString()}");
 
                         var lookup = _exeIconCache.GetAlternateLookup<ReadOnlySpan<char>>();
                         if (lookup.TryGetValue(span, out var cachedIcon))
@@ -545,7 +540,7 @@ namespace StageManagerApp
                             return cachedIcon;
                         }
 
-                        string processPath = new string(buffer, 0, (int)size);
+                        string processPath = span.ToString();
                         Win32.SHFILEINFO shinfo = new Win32.SHFILEINFO();
                         IntPtr hImg = Win32.SHGetFileInfo(processPath, 0, ref shinfo, (uint)Marshal.SizeOf(shinfo), Win32.SHGFI_ICON | Win32.SHGFI_LARGEICON);
                         
@@ -575,11 +570,10 @@ namespace StageManagerApp
                                 Win32.DestroyIcon(shinfo.hIcon);
                             }
                         }
-                    }
-                    else
-                    {
-                        Win32.CloseHandle(hProcess);
-                    }
+                }
+                else
+                {
+                    Win32.CloseHandle(hProcess);
                 }
             }
 
@@ -601,36 +595,37 @@ namespace StageManagerApp
         private bool IsValidStageWindow(IntPtr hWnd, out WindowInfo? info)
         {
             info = null;
-            if (!Win32.IsWindow(hWnd) || !Win32.IsWindowVisible(hWnd)) return false;
+            bool isVis = Win32.IsWindowVisible(hWnd);
+            // Log.Information($"[IsValidStageWindow] {hWnd} IsWindow: {Win32.IsWindow(hWnd)}, IsVisible: {isVis}");
+            if (!Win32.IsWindow(hWnd) || !isVis) return false;
+            Log.Information($"[IsValidStageWindow] {hWnd} is visible");
 
             bool isExcluded = false;
-            unsafe
+            Span<char> buffer = stackalloc char[256];
+            int len = Win32.GetClassName(hWnd, buffer, 256);
+            if (len > 0) 
             {
-                char* buffer = stackalloc char[256];
-                int len = Win32.GetClassName(hWnd, buffer, 256);
-                if (len > 0) 
+                ReadOnlySpan<char> span = buffer.Slice(0, len);
+                if (span is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Windows.UI.Core.CoreWindow" or "StageManagerApp") 
                 {
-                    ReadOnlySpan<char> span = new ReadOnlySpan<char>(buffer, len);
-                    if (span is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Windows.UI.Core.CoreWindow" or "StageManagerApp") 
-                    {
-                        isExcluded = true;
-                    }
+                    isExcluded = true;
                 }
             }
-            if (isExcluded) return false;
+            if (isExcluded) { Log.Information($"[Exclude] {hWnd} is excluded class"); return false; }
 
             long exStyle = Win32.GetWindowLongPtr(hWnd, Win32.GWL_EXSTYLE).ToInt64();
-            if ((exStyle & Win32.WS_EX_TOOLWINDOW) != 0) return false;
+            if ((exStyle & Win32.WS_EX_TOOLWINDOW) != 0) { Log.Information($"[Exclude] {hWnd} is TOOLWINDOW"); return false; }
 
             IntPtr owner = Win32.GetWindow(hWnd, Win32.GW_OWNER);
-            if (owner != IntPtr.Zero && (exStyle & Win32.WS_EX_APPWINDOW) == 0) return false;
+            if (owner != IntPtr.Zero && (exStyle & Win32.WS_EX_APPWINDOW) == 0) { Log.Information($"[Exclude] {hWnd} has owner"); return false; }
 
             int hr = Win32.DwmGetWindowAttribute(hWnd, Win32.DWMWA_CLOAKED, out int cloaked, sizeof(int));
-            if (hr == 0 && cloaked != 0) return false;
+            if (hr == 0 && cloaked != 0) { Log.Information($"[Exclude] {hWnd} is cloaked"); return false; }
 
             Win32.GetWindowThreadProcessId(hWnd, out uint pid);
-            if (pid == CurrentPid || pid == 0) return false;
+            if (pid == CurrentPid || pid == 0) { Log.Information($"[Exclude] {hWnd} is self or 0"); return false; }
 
+            Log.Information($"[IsValidStageWindow] ACCEPTED hWnd: {hWnd}");
             info = new WindowInfo
             {
                 Hwnd = hWnd,

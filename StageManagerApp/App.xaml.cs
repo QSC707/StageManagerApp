@@ -18,6 +18,16 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        this.DispatcherUnhandledException += (s, args) => 
+        {
+            Log.Fatal(args.Exception, "Unhandled UI Exception");
+            args.Handled = true;
+            Current.Shutdown();
+        };
+        AppDomain.CurrentDomain.UnhandledException += (s, args) => 
+        {
+            Log.Fatal(args.ExceptionObject as Exception, "Unhandled AppDomain Exception");
+        };
         
         string logDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs");
         

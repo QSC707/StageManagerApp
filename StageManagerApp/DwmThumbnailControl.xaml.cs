@@ -72,7 +72,7 @@ namespace StageManagerApp
 
         private Win32.RECT _lastRect;
 
-        private void RegisterThumbnail()
+        private async void RegisterThumbnail()
         {
             UnregisterThumbnail();
             _lastRect = default;
@@ -87,7 +87,15 @@ namespace StageManagerApp
                 var hr = Win32.DwmRegisterThumbnail(windowInterop.Handle, TargetHwnd, out _dwmThumbnail);
                 if (hr == 0)
                 {
-                    UpdateThumbnail();
+                    // Delay thumbnail rendering to let the Windows minimize animation finish
+                    // This prevents glitchy snapshots of distorted mid-animation windows.
+                    await System.Threading.Tasks.Task.Delay(150);
+                    
+                    // If the thumbnail was unregistered while we were waiting, abort.
+                    if (_dwmThumbnail != IntPtr.Zero)
+                    {
+                        UpdateThumbnail();
+                    }
                 }
                 else
                 {
