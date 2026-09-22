@@ -59,8 +59,10 @@ namespace StageManagerApp
 
         public ObservableCollection<StageGroup> BackgroundGroups { get; } = [];
         public StageGroup ActiveStage { get; private set; } = new StageGroup();
-
         public event Action<IntPtr>? OnForegroundWindowChangedEvent;
+
+        private Win32.WinEventDelegate? _fgEventDelegate;
+        private IntPtr _fgWinEventHook;
 
         public WindowManager()
         {
@@ -82,6 +84,16 @@ namespace StageManagerApp
 
             Win32.RegisterShellHookWindow(_msgHwnd);
 
+            _fgEventDelegate = new Win32.WinEventDelegate(WinEventCallback);
+            _fgWinEventHook = Win32.SetWinEventHook(
+                Win32.EVENT_SYSTEM_FOREGROUND, 
+                Win32.EVENT_SYSTEM_FOREGROUND, 
+                IntPtr.Zero, 
+                _fgEventDelegate, 
+                0, 
+                0, 
+                Win32.WINEVENT_OUTOFCONTEXT);
+
             // 初始状态拉取
             PopulateInitialState();
         }
@@ -94,6 +106,19 @@ namespace StageManagerApp
                 Win32.DeregisterShellHookWindow(_msgHwnd);
                 _msgSource.Dispose();
                 _msgHwnd = IntPtr.Zero;
+            }
+            if (_fgWinEventHook != IntPtr.Zero)
+            {
+                Win32.UnhookWinEvent(_fgWinEventHook);
+                _fgWinEventHook = IntPtr.Zero;
+            }
+        }
+
+        private void WinEventCallback(IntPtr hWinEventHook, uint eventType, IntPtr hwnd, int idObject, int idChild, uint dwEventThread, uint dwmsEventTime)
+        {
+            if (eventType == Win32.EVENT_SYSTEM_FOREGROUND)
+            {
+                OnForegroundWindowChanged(hwnd);
             }
         }
 
@@ -603,15 +628,32 @@ namespace StageManagerApp
             bool isExcluded = false;
             Span<char> buffer = stackalloc char[256];
             int len = Win32.GetClassName(hWnd, buffer, 256);
+            string className = "";
             if (len > 0) 
             {
                 ReadOnlySpan<char> span = buffer.Slice(0, len);
+                className = span.ToString();
                 if (span is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Windows.UI.Core.CoreWindow" or "StageManagerApp") 
                 {
                     isExcluded = true;
                 }
             }
-            if (isExcluded) { Log.Information($"[Exclude] {hWnd} is excluded class"); return false; }
+            
+            Span<char> titleBuffer = stackalloc char[256];
+            int titleLen = Win32.GetWindowText(hWnd, titleBuffer, 256);
+            string titleName = titleLen > 0 ? titleBuffer.Slice(0, titleLen).ToString() : "";
+
+            Win32.GetWindowThreadProcessId(hWnd, out uint processId);
+            string processName = "";
+            try {
+                using (var proc = System.Diagnostics.Process.GetProcessById((int)processId))
+                {
+                    processName = proc.ProcessName;
+                }
+            } catch { }
+
+            Log.Information($"[IsValidStageWindow] hWnd: {hWnd}, ClassName: {className}, Title: {titleName}, Process: {processName}");
+            if (isExcluded) { Log.Information($"[Exclude] {hWnd} is excluded class ({className})"); return false; }
 
             long exStyle = Win32.GetWindowLongPtr(hWnd, Win32.GWL_EXSTYLE).ToInt64();
             if ((exStyle & Win32.WS_EX_TOOLWINDOW) != 0) { Log.Information($"[Exclude] {hWnd} is TOOLWINDOW"); return false; }
