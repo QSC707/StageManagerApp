@@ -133,7 +133,7 @@ namespace StageManagerApp
                 ReadOnlySpan<char> span = buffer.Slice(0, len);
                 if (span is "Progman" or "WorkerW" or "Shell_TrayWnd")
                 {
-                    SetOccluded(false);
+                    SetOccluded(true);
                     return;
                 }
             }
