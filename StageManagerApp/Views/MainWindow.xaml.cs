@@ -156,7 +156,7 @@ namespace StageManagerApp
 
             // 获取窗口状态，判断是否最大化或全屏
             Win32.WINDOWPLACEMENT placement = new Win32.WINDOWPLACEMENT();
-            placement.length = Marshal.SizeOf(typeof(Win32.WINDOWPLACEMENT));
+            placement.length = Marshal.SizeOf<Win32.WINDOWPLACEMENT>();
             if (Win32.GetWindowPlacement(_currentForegroundHwnd, ref placement))
             {
                 bool isMaximized = placement.showCmd == Win32.SW_SHOWMAXIMIZED;
