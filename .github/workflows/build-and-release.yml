@@ -29,60 +29,35 @@ jobs:
       - name: Restore Dependencies
         run: dotnet restore StageManagerApp/StageManagerApp.csproj
 
-      - name: Publish 1. Standalone Single-File (Self-Contained + Compressed)
+      - name: Build Recommended Standalone Release (AOT Pre-compiled + Compressed Single File)
         run: |
-          dotnet publish StageManagerApp/StageManagerApp.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -o ./release_standalone
+          dotnet publish StageManagerApp/StageManagerApp.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:PublishReadyToRun=true -o ./release_output
 
-      - name: Publish 2. ReadyToRun AOT (Ahead-Of-Time Native Pre-compiled)
-        run: |
-          dotnet publish StageManagerApp/StageManagerApp.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:PublishReadyToRun=true -o ./release_r2r
-
-      - name: Publish 3. Lightweight Framework-Dependent (~200KB)
-        run: |
-          dotnet publish StageManagerApp/StageManagerApp.csproj -c Release --self-contained false -o ./release_fdd
-
-      - name: Publish 4. Native AOT Experimental
-        continue-on-error: true
-        run: |
-          dotnet publish StageManagerApp/StageManagerApp.csproj -c Release -r win-x64 -p:PublishAot=true -p:_SuppressWpfTrimError=true -p:_SuppressWinFormsTrimError=true -o ./release_native_aot
-
-      - name: Package Archives
+      - name: Package Release
         shell: pwsh
         run: |
-          Compress-Archive -Path "./release_standalone/StageManagerApp.exe" -DestinationPath "./StageManagerApp-win-x64-Standalone.zip" -Force
-          Compress-Archive -Path "./release_r2r/StageManagerApp.exe" -DestinationPath "./StageManagerApp-win-x64-ReadyToRun-AOT.zip" -Force
-          Compress-Archive -Path "./release_fdd/*" -DestinationPath "./StageManagerApp-FrameworkDependent.zip" -Force
-          Copy-Item -Path "./release_standalone/StageManagerApp.exe" -Destination "./StageManagerApp.exe" -Force
-
-          if (Test-Path "./release_native_aot/StageManagerApp.exe") {
-              Compress-Archive -Path "./release_native_aot/StageManagerApp.exe" -DestinationPath "./StageManagerApp-win-x64-NativeAOT-Experimental.zip" -Force
-          }
+          Compress-Archive -Path "./release_output/StageManagerApp.exe" -DestinationPath "./StageManagerApp-win-x64.zip" -Force
+          Copy-Item -Path "./release_output/StageManagerApp.exe" -Destination "./StageManagerApp.exe" -Force
 
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: StageManagerApp-All-Builds
+          name: StageManagerApp-Release
           path: |
-            ./StageManagerApp-win-x64-Standalone.zip
-            ./StageManagerApp-win-x64-ReadyToRun-AOT.zip
-            ./StageManagerApp-FrameworkDependent.zip
+            ./StageManagerApp-win-x64.zip
             ./StageManagerApp.exe
-            ./StageManagerApp-win-x64-NativeAOT-Experimental.zip
 
       - name: Create or Update GitHub Release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch'
         with:
-          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v1.0.2' }}
-          name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'StageManagerApp v1.0.2 (多版本矩阵发布)' }}
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v1.0.3' }}
+          name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'StageManagerApp 极速绿色单文件版' }}
           draft: false
           prerelease: false
           generate_release_notes: true
           files: |
-            ./StageManagerApp-win-x64-Standalone.zip
-            ./StageManagerApp-win-x64-ReadyToRun-AOT.zip
-            ./StageManagerApp-FrameworkDependent.zip
+            ./StageManagerApp-win-x64.zip
             ./StageManagerApp.exe
-            ./StageManagerApp-win-x64-NativeAOT-Experimental.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

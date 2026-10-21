@@ -9,18 +9,16 @@
 
 ---
 
-## 📥 下载与各版本说明 (Downloads & Editions)
+## 📥 极速下载直接使用 (Direct Download)
 
-本项目提供多种构建版本，满足不同用户的环境与性能偏好：
+无需安装任何 .NET 运行时或环境，下载即用（绿色免安装版）：
 
-👉 **[前往 GitHub Releases 查看并下载最新版本](https://github.com/QSC707/StageManagerApp/releases/latest)**
+👉 **[点击前往 GitHub Releases 下载最新版本](https://github.com/QSC707/StageManagerApp/releases/latest)**
 
-| 版本名称 | 资产文件名 | 大小 | 运行要求 | 详细说明与推荐人群 |
-|---|---|---|---|---|
-| 🟢 **独立免安装绿色版 (推荐)** | `StageManagerApp-win-x64-Standalone.zip` 或 `StageManagerApp.exe` | ~68 MB | **无**（解压即用） | **最适合绝大多数用户**。单文件内置 .NET 10 完整运行时，并开启了 LZ4 高效单文件压缩，任何电脑开箱即用，无需配置环境。 |
-| ⚡ **ReadyToRun (R2R AOT) 极速版** | `StageManagerApp-win-x64-ReadyToRun-AOT.zip` | ~80 MB | **无**（解压即用） | **追求瞬时响应与极致低延迟的用户**。利用 .NET Crossgen2 提前将 IL 编译为 CPU 本地机器码，彻底消除首次运行 JIT 预热延迟，兼具 100% 稳定性与原生效能。 |
-| 🪶 **超轻极速便携版** | `StageManagerApp-FrameworkDependent.zip` | **仅 ~200 KB** | 需安装 [.NET 10 运行时](https://dotnet.microsoft.com/download) | **极客/追求极小磁盘占用的用户**。仅包含本应用自身的核心逻辑与样式资源，体积羽量级，内存与硬盘开销极低。 |
-| 🧪 **Native AOT 实验版** | `StageManagerApp-win-x64-NativeAOT-Experimental.zip` | ~18 MB | 纯二进制机器码 | **技术尝鲜版**。通过 C++ 原生链接器编译为无 VM 纯机器码（注：由于微软官方对经典 WPF 动态反射和 XAML 树的限制，此版本供底层探索，可能存在特定边缘情况）。 |
+- **下载方式 1 (最省事)**：直接下载 **`StageManagerApp.exe`**，双击直接运行！
+- **下载方式 2 (打包版)**：下载 **`StageManagerApp-win-x64.zip`**，解压后双击运行。
+
+> **💡 底层优化**：本版本深度整合了 **ReadyToRun (AOT) 机器码预编译** 与 **LZ4 单文件原生高压打包**。既做到了全平台免配环境开箱即用，又消除了 JIT 预热延迟，秒开瞬切，极其丝滑。
 
 ---
 
