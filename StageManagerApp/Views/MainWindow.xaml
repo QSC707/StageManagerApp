@@ -6,7 +6,8 @@
         WindowStyle="None" AllowsTransparency="True" Background="Transparent"
         Topmost="True" ShowInTaskbar="False" ResizeMode="NoResize"
         Loaded="Window_Loaded" Closed="Window_Closed">
-    <Grid Background="#01000000">
+    <Grid Background="Transparent">
+        <Border x:Name="HoverTrigger" Width="3" HorizontalAlignment="Right" Background="#01000000" MouseEnter="HoverTrigger_MouseEnter" />
         <ScrollViewer VerticalAlignment="Center" Margin="0,60,0,60" VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Disabled">
             <ItemsControl x:Name="ThumbnailsList">
                 <ItemsControl.ItemTemplate>
@@ -113,6 +114,15 @@
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
         </ScrollViewer>
+
+        <!-- 悬停按钮面板，放置于左下角 -->
+        <StackPanel HorizontalAlignment="Left" VerticalAlignment="Bottom" Orientation="Horizontal" Margin="20,0,0,20" Panel.ZIndex="100">
+            <!-- 隐藏按钮 -->
+            <Border Background="#333333" CornerRadius="14" Width="28" Height="28" Margin="0,0,10,0" Cursor="Hand" MouseLeftButtonUp="HideBtn_Click" ToolTip="隐藏侧边栏">
+                <Border.Effect><DropShadowEffect BlurRadius="4" Opacity="0.5" ShadowDepth="1.5" Direction="270"/></Border.Effect>
+                <TextBlock Text="&#xE76C;" FontFamily="Segoe MDL2 Assets" Foreground="#AAFFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="11"/>
+            </Border>
+        </StackPanel>
     </Grid>
 </Window>
 

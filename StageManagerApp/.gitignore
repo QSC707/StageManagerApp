@@ -1,8 +1,11 @@
 bin/
 obj/
+publish/
+PublishOutput/
+test_pub/
 *.user
 *.suo
 .vs/
-publish/
-PublishOutput/
+.vscode/
+.idea/
 *.log

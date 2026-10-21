@@ -72,9 +72,6 @@ namespace StageManagerApp
         [LibraryImport("user32.dll", EntryPoint = "GetClassNameW", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
         public static partial int GetClassName(IntPtr hWnd, Span<char> lpClassName, int nMaxCount);
 
-        [LibraryImport("user32.dll", EntryPoint = "GetWindowTextW", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
-        public static partial int GetWindowText(IntPtr hWnd, Span<char> lpString, int nMaxCount);
-
         [DllImport("user32.dll", SetLastError = true)]
         public static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
 
@@ -87,8 +84,8 @@ namespace StageManagerApp
         [LibraryImport("user32.dll")]
         public static partial uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 
-        [LibraryImport("dwmapi.dll")]
-        public static partial int DwmSetWindowAttribute(IntPtr hwnd, int dwAttribute, ref int pvAttribute, int cbAttribute);
+        [DllImport("dwmapi.dll", PreserveSig = true)]
+        public static extern int DwmSetWindowAttribute(IntPtr hwnd, int dwAttribute, ref int pvAttribute, int cbAttribute);
 
         public delegate void WinEventDelegate(IntPtr hWinEventHook, uint eventType, IntPtr hwnd, int idObject, int idChild, uint dwEventThread, uint dwmsEventTime);
 
@@ -100,7 +97,6 @@ namespace StageManagerApp
         public static extern bool UnhookWinEvent(IntPtr hWinEventHook);
 
         public const uint EVENT_OBJECT_LOCATIONCHANGE = 0x800B;
-        public const uint EVENT_SYSTEM_FOREGROUND = 0x0003;
         public const uint WINEVENT_OUTOFCONTEXT = 0;
         public const int OBJID_WINDOW = 0;
 
@@ -164,6 +160,7 @@ namespace StageManagerApp
         public const int WS_EX_APPWINDOW = 0x00040000;
         public const int WS_EX_NOACTIVATE = 0x08000000;
         public const int GW_OWNER = 4;
+        public const int DWMWA_TRANSITIONS_FORCEDISABLE = 3;
         public const int DWMWA_EXTENDED_FRAME_BOUNDS = 9;
         public const int DWMWA_CLOAKED = 14;
 

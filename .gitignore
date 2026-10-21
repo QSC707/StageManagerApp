@@ -1,0 +1,21 @@
+﻿# Build and Output Folders
+**/[Bb]in/
+**/[Oo]bj/
+**/publish/
+**/PublishOutput/
+**/test_pub/
+*.log
+
+# IDE & OS temporary files
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+Thumbs.db
+[Ee]xpress/
+
+# Workspace experimental & scratch directories
+second-brain-viz/
+stage-manager-extension/
+stage-manager-probe/

@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Controls;
+using System.Windows.Threading;
 using Serilog;
 
 namespace StageManagerApp
@@ -13,6 +14,7 @@ namespace StageManagerApp
         private WindowManager _windowManager;
 
         private bool _isHovered = false;
+        private bool _forceHidden = false;
         private double _visibleLeft;
         private double _hiddenLeft;
 
@@ -21,9 +23,6 @@ namespace StageManagerApp
             InitializeComponent();
             _windowManager = new WindowManager();
             this.DataContext = _windowManager;
-            
-            this.MouseEnter += MainWindow_MouseEnter;
-            this.MouseLeave += MainWindow_MouseLeave;
 
             _windowManager.OnForegroundWindowChangedEvent += WindowManager_OnForegroundWindowChangedEvent;
         }
@@ -46,11 +45,14 @@ namespace StageManagerApp
             ThumbnailsList.ItemsSource = _windowManager.BackgroundGroups;
 
             _locChangeDelegate = new Win32.WinEventDelegate(WinEventCallback);
-            _occlusionTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
+            _occlusionTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
             _occlusionTimer.Tick += (s, args) => {
                 _occlusionTimer.Stop();
                 CheckOcclusion();
             };
+
+            _hoverTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
+            _hoverTimer.Tick += HoverTimer_Tick;
             
             IntPtr fg = Win32.GetForegroundWindow();
             if (fg != IntPtr.Zero) WindowManager_OnForegroundWindowChangedEvent(fg);
@@ -58,22 +60,36 @@ namespace StageManagerApp
             UpdateVisibilityState();
         }
 
-        private void MainWindow_MouseEnter(object sender, MouseEventArgs e)
+        private void HoverTrigger_MouseEnter(object sender, MouseEventArgs e)
         {
-            _isHovered = true;
-            UpdateVisibilityState();
+            if (!_isHovered)
+            {
+                _isHovered = true;
+                _forceHidden = false;
+                UpdateVisibilityState();
+                _hoverTimer?.Start();
+            }
         }
 
-        private void MainWindow_MouseLeave(object sender, MouseEventArgs e)
+        private void HoverTimer_Tick(object? sender, EventArgs e)
         {
-            _isHovered = false;
-            UpdateVisibilityState();
+            if (Win32.GetCursorPos(out var pt))
+            {
+                // Add a small buffer to avoid jitter
+                if (pt.X > this.Left + this.Width + 10 && !_isDragging)
+                {
+                    _isHovered = false;
+                    _hoverTimer?.Stop();
+                    UpdateVisibilityState();
+                }
+            }
         }
 
         private IntPtr _currentForegroundHwnd;
         private Win32.WinEventDelegate? _locChangeDelegate;
         private IntPtr _winEventHook;
-        private System.Windows.Threading.DispatcherTimer _occlusionTimer;
+        private DispatcherTimer? _occlusionTimer;
+        private DispatcherTimer? _hoverTimer;
         private bool _isOccluded;
 
         private void WindowManager_OnForegroundWindowChangedEvent(IntPtr foregroundHwnd)
@@ -114,8 +130,8 @@ namespace StageManagerApp
         private void WinEventCallback(IntPtr hWinEventHook, uint eventType, IntPtr hwnd, int idObject, int idChild, uint dwEventThread, uint dwmsEventTime)
         {
             if (idObject != 0 /* OBJID_WINDOW */) return;
-            _occlusionTimer.Stop();
-            _occlusionTimer.Start();
+            _occlusionTimer?.Stop();
+            _occlusionTimer?.Start();
         }
 
         private void CheckOcclusion()
@@ -133,7 +149,7 @@ namespace StageManagerApp
                 ReadOnlySpan<char> span = buffer.Slice(0, len);
                 if (span is "Progman" or "WorkerW" or "Shell_TrayWnd")
                 {
-                    SetOccluded(true);
+                    SetOccluded(false);
                     return;
                 }
             }
@@ -167,13 +183,17 @@ namespace StageManagerApp
             if (_isOccluded != occluded)
             {
                 _isOccluded = occluded;
+                if (!occluded) 
+                {
+                    _forceHidden = false;
+                }
                 UpdateVisibilityState();
             }
         }
 
         private void UpdateVisibilityState()
         {
-            bool isVisible = _isHovered || _isDragging || !_isOccluded;
+            bool isVisible = !_forceHidden && (_isHovered || _isDragging || !_isOccluded);
             double targetLeft = isVisible ? _visibleLeft : _hiddenLeft;
             
             var anim = new System.Windows.Media.Animation.DoubleAnimation
@@ -187,12 +207,20 @@ namespace StageManagerApp
 
         private void Window_Closed(object sender, EventArgs e)
         {
+            _occlusionTimer?.Stop();
+            _hoverTimer?.Stop();
             if (_winEventHook != IntPtr.Zero)
             {
                 Win32.UnhookWinEvent(_winEventHook);
                 _winEventHook = IntPtr.Zero;
             }
             _windowManager.Dispose();
+        }
+
+        private void HideBtn_Click(object sender, MouseButtonEventArgs e)
+        {
+            _forceHidden = true;
+            UpdateVisibilityState();
         }
 
         private Point _dragStartPoint;
