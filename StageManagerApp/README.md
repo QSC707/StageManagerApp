@@ -9,14 +9,16 @@
 
 ---
 
-## 📥 直接下载免安装使用 (Direct Download)
+## 📥 下载与使用 (Downloads)
 
-无需安装任何 .NET 运行时，下载即用（单文件绿色独立版本）：
+发布提供两种版本，请根据个人偏好选择：
 
-👉 **[前往 GitHub Releases 下载最新版本](https://github.com/QSC707/StageManagerApp/releases/latest)**
+👉 **[前往 GitHub Releases 查看所有版本](https://github.com/QSC707/StageManagerApp/releases/latest)**
 
-1. 下载 `StageManagerApp-win-x64.zip`
-2. 解压后双击 `StageManagerApp.exe` 即可直接运行！
+| 版本 | 文件名 | 体积 | 特点 |
+|---|---|---|---|
+| 🟢 **独立免安装绿色版 (推荐)** | `StageManagerApp-win-x64-Standalone.zip` 或 `StageManagerApp.exe` | ~68 MB | 内置 .NET 10 单文件压缩运行时，**电脑无需安装任何环境**，解压/双击直接运行。 |
+| ⚡ **超轻极速版 (Framework-Dependent)** | `StageManagerApp-FrameworkDependent.zip` | **仅 ~200 KB** | 极致小巧轻盈，需电脑已安装 [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download)。 |
 
 ---
 
